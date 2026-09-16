@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db, transcriptSegments } from "@/db";
+import { rejectIfSample } from "@/lib/guards";
 
 function splitSentences(text: string) {
   return text.split(/(?<=[.?!])\s+(?=\S)/).map((s) => s.trim()).filter(Boolean);
@@ -14,6 +15,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ segId:
   const { segId } = await params;
   const [seg] = await db.select().from(transcriptSegments).where(eq(transcriptSegments.id, Number(segId)));
   if (!seg) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const blocked = await rejectIfSample(seg.meetingId);
+  if (blocked) return blocked;
 
   const parts = splitSentences(seg.text);
   if (parts.length < 2) return NextResponse.json({ error: "This line is a single sentence" }, { status: 400 });

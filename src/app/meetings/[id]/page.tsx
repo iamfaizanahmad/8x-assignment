@@ -1,8 +1,14 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { MeetingView } from "@/components/meeting/meeting-view";
 import { getMeeting } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const data = await getMeeting((await params).id);
+  return { title: data ? `${data.meeting.title} — Minutes` : "Meeting not found — Minutes" };
+}
 
 export default async function MeetingPage({
   params,

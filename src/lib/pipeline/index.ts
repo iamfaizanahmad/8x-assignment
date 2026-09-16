@@ -1,14 +1,13 @@
 import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { actionItems, db, meetings, speakers, summaries, transcriptSegments, type TemplateId } from "@/db";
-import { signDownload } from "@/lib/storage";
+import { MAX_UPLOAD_DURATION_S } from "@/lib/limits";
+import { objectExists, signDownload } from "@/lib/storage";
 import { analyzeMeeting, renderTranscript, summarizeWithTemplate } from "./ai";
 import { transcribeUrl } from "./deepgram";
 
-export const MAX_UPLOAD_DURATION_S = 20 * 60;
-
 async function setStatus(id: string, status: typeof meetings.$inferSelect.status, error: string | null = null) {
-  await db.update(meetings).set({ status, error }).where(eq(meetings.id, id));
+  await db.update(meetings).set({ status, error, statusUpdatedAt: new Date() }).where(eq(meetings.id, id));
 }
 
 /** Transcript as the model sees it, with renamed speakers applied. */
@@ -34,8 +33,11 @@ export async function processMeeting(id: string) {
 
   try {
     await setStatus(id, "transcribing");
+    if (!(await objectExists(meeting.mediaKey)))
+      throw new Error("The recording never finished uploading. Delete this meeting and upload the file again.");
     const { durationS, segments } = await transcribeUrl(await signDownload(meeting.mediaKey, 60 * 60));
     if (segments.length === 0) throw new Error("No speech detected in this recording");
+    // Backstop only: the upload API already rejects long files using the duration the browser reads before uploading.
     if (meeting.source === "upload" && durationS > MAX_UPLOAD_DURATION_S)
       throw new Error(`Recording is ${Math.round(durationS / 60)} min; the demo limit is ${MAX_UPLOAD_DURATION_S / 60} min`);
 
@@ -94,15 +96,35 @@ export async function processMeeting(id: string) {
   }
 }
 
+export class SummaryUnavailableError extends Error {
+  constructor(
+    message: string,
+    readonly status: 404 | 409,
+  ) {
+    super(message);
+  }
+}
+
 /** Cached per (meeting, template): generated once, read from the DB forever after. */
 export async function getOrCreateSummary(meetingId: string, template: TemplateId) {
-  const [existing] = await db
-    .select()
-    .from(summaries)
-    .where(and(eq(summaries.meetingId, meetingId), eq(summaries.template, template)));
+  const findExisting = async () =>
+    (await db.select().from(summaries).where(and(eq(summaries.meetingId, meetingId), eq(summaries.template, template))))[0];
+
+  const existing = await findExisting();
   if (existing) return existing;
-  const [meeting] = await db.select({ attendees: meetings.attendees }).from(meetings).where(eq(meetings.id, meetingId));
-  const content = await summarizeWithTemplate(await loadTranscriptText(meetingId), template, meeting?.attendees ?? []);
-  const [row] = await db.insert(summaries).values({ meetingId, template, content }).returning();
-  return row;
+
+  // Validate before paying for a Claude call: the id must be a real, fully processed meeting with a transcript.
+  const [meeting] = await db
+    .select({ status: meetings.status, attendees: meetings.attendees })
+    .from(meetings)
+    .where(eq(meetings.id, meetingId));
+  if (!meeting) throw new SummaryUnavailableError("Meeting not found", 404);
+  if (meeting.status !== "ready") throw new SummaryUnavailableError("This meeting is still processing", 409);
+  const transcript = await loadTranscriptText(meetingId);
+  if (!transcript.trim()) throw new SummaryUnavailableError("This meeting has no transcript to summarize", 409);
+
+  const content = await summarizeWithTemplate(transcript, template, meeting.attendees);
+  // Two viewers can race to the same template; the unique index keeps one row and both get it back.
+  await db.insert(summaries).values({ meetingId, template, content }).onConflictDoNothing();
+  return (await findExisting())!;
 }

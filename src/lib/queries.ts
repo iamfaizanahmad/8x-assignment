@@ -1,7 +1,19 @@
 import "server-only";
+import { cache } from "react";
 import { asc, desc, eq, ilike, inArray, sql } from "drizzle-orm";
 import { actionItems, db, highlights, meetings, shareLinks, speakers, summaries, transcriptSegments } from "@/db";
 import { signDownload } from "@/lib/storage";
+
+type MeetingRow = typeof meetings.$inferSelect;
+
+/** Pages render in the browser with no login: never ship invitee names, calendar ids or uploader hashes. */
+function publicMeeting(m: MeetingRow): Omit<MeetingRow, "attendees" | "calendarEventId" | "uploaderHash"> {
+  const rest: Partial<MeetingRow> = { ...m };
+  delete rest.attendees;
+  delete rest.calendarEventId;
+  delete rest.uploaderHash;
+  return rest as Omit<MeetingRow, "attendees" | "calendarEventId" | "uploaderHash">;
+}
 
 export async function listMeetings() {
   const rows = await db.select().from(meetings).orderBy(desc(meetings.startedAt));
@@ -13,14 +25,14 @@ export async function listMeetings() {
       ])
     : [[], []];
   return rows.map((m) => ({
-    ...m,
+    ...publicMeeting(m),
     speakers: speakerRows.filter((s) => s.meetingId === m.id).sort((a, b) => b.talkTimeS - a.talkTimeS),
     actionItemCount: actionRows.filter((a) => a.meetingId === m.id).length,
   }));
 }
 export type MeetingListItem = Awaited<ReturnType<typeof listMeetings>>[number];
 
-export async function getMeeting(id: string) {
+export const getMeeting = cache(async (id: string) => {
   const [meeting] = await db.select().from(meetings).where(eq(meetings.id, id));
   if (!meeting) return null;
   const [speakerRows, segments, summaryRows, actions, highlightRows, mediaUrl] = await Promise.all([
@@ -42,7 +54,7 @@ export async function getMeeting(id: string) {
     meeting.mediaKey ? signDownload(meeting.mediaKey) : Promise.resolve(null),
   ]);
   return {
-    meeting,
+    meeting: publicMeeting(meeting),
     mediaUrl,
     speakers: speakerRows,
     segments,
@@ -50,16 +62,16 @@ export async function getMeeting(id: string) {
     actionItems: actions,
     highlights: highlightRows,
   };
-}
+});
 export type MeetingDetail = NonNullable<Awaited<ReturnType<typeof getMeeting>>>;
 
-export async function getShare(slug: string) {
+export const getShare = cache(async (slug: string) => {
   const [link] = await db.select().from(shareLinks).where(eq(shareLinks.slug, slug));
   if (!link) return null;
   const data = await getMeeting(link.meetingId);
   if (!data || data.meeting.status !== "ready") return null;
   return { link, data };
-}
+});
 
 export type SearchHit = {
   meetingId: string;

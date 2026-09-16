@@ -1,5 +1,5 @@
 import "server-only";
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const s3 = new S3Client({ region: process.env.AWS_REGION });
@@ -24,6 +24,16 @@ export async function deleteObject(key: string) {
     return true;
   } catch (err) {
     console.warn(`[storage] could not delete ${key}:`, err instanceof Error ? err.name : err);
+    return false;
+  }
+}
+
+/** Whether the browser's upload actually landed. Uses s3:GetObject permission. */
+export async function objectExists(key: string) {
+  try {
+    await s3.send(new HeadObjectCommand({ Bucket, Key: key }));
+    return true;
+  } catch {
     return false;
   }
 }

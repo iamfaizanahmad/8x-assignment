@@ -6,14 +6,25 @@ export type Player = ReturnType<typeof usePlayer>;
 
 /** Shared playback state: one <video>/<audio> element, a smooth playhead, and seek(). */
 export function usePlayer(opts: { clip?: { startMs: number; endMs: number }; initialMs?: number } = {}) {
-  const mediaRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);
-  const [currentMs, setCurrentMs] = useState(opts.clip?.startMs ?? opts.initialMs ?? 0);
+  // The element can be replaced (e.g. remounted after an expired signed URL is refreshed), so track it as state
+  // and re-attach listeners whenever it changes.
+  const [el, setEl] = useState<HTMLMediaElement | null>(null);
+  const elRef = useRef<HTMLMediaElement | null>(null);
+  const mediaRef = useCallback((node: HTMLMediaElement | null) => {
+    elRef.current = node;
+    setEl(node);
+  }, []);
+  const [currentMs, setCurrentMsState] = useState(opts.clip?.startMs ?? opts.initialMs ?? 0);
+  const lastMs = useRef<number | null>(null);
+  const setCurrentMs = useCallback((ms: number) => {
+    lastMs.current = ms;
+    setCurrentMsState(ms);
+  }, []);
   const [playing, setPlaying] = useState(false);
   const [durationMs, setDurationMs] = useState(0);
   const { clip } = opts;
 
   useEffect(() => {
-    const el = mediaRef.current;
     if (!el) return;
     let raf = 0;
     const tick = () => {
@@ -39,7 +50,8 @@ export function usePlayer(opts: { clip?: { startMs: number; endMs: number }; ini
     const onSeeked = () => setCurrentMs(el.currentTime * 1000);
     const onMeta = () => {
       setDurationMs(el.duration * 1000);
-      const start = clip?.startMs ?? opts.initialMs;
+      // First load starts at the clip / deep link; a replaced element resumes where playback was.
+      const start = lastMs.current ?? clip?.startMs ?? opts.initialMs;
       if (start) el.currentTime = start / 1000;
     };
     el.addEventListener("play", onPlay);
@@ -55,21 +67,24 @@ export function usePlayer(opts: { clip?: { startMs: number; endMs: number }; ini
       el.removeEventListener("loadedmetadata", onMeta);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clip?.startMs, clip?.endMs]);
+  }, [el, clip?.startMs, clip?.endMs]);
 
-  const seek = useCallback((ms: number, play = true) => {
-    const el = mediaRef.current;
-    if (!el) return;
-    el.currentTime = Math.max(0, ms) / 1000;
-    setCurrentMs(ms);
-    if (play) el.play().catch(() => {});
-  }, []);
+  const seek = useCallback(
+    (ms: number, play = true) => {
+      const media = elRef.current;
+      if (!media) return;
+      media.currentTime = Math.max(0, ms) / 1000;
+      setCurrentMs(ms);
+      if (play) media.play().catch(() => {});
+    },
+    [setCurrentMs],
+  );
 
   const toggle = useCallback(() => {
-    const el = mediaRef.current;
-    if (!el) return;
-    if (el.paused) el.play().catch(() => {});
-    else el.pause();
+    const media = elRef.current;
+    if (!media) return;
+    if (media.paused) media.play().catch(() => {});
+    else media.pause();
   }, []);
 
   return { mediaRef, currentMs, playing, durationMs, seek, toggle };

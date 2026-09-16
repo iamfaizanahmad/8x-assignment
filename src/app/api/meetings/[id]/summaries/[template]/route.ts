@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { TemplateId } from "@/db";
-import { getOrCreateSummary } from "@/lib/pipeline";
+import { getOrCreateSummary, SummaryUnavailableError } from "@/lib/pipeline";
 import { TEMPLATES } from "@/lib/pipeline/templates";
 
 export const maxDuration = 120;
@@ -12,6 +12,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     const summary = await getOrCreateSummary(id, template as TemplateId);
     return NextResponse.json(summary);
   } catch (err) {
+    if (err instanceof SummaryUnavailableError) return NextResponse.json({ error: err.message }, { status: err.status });
     console.error("[summary]", err);
     return NextResponse.json({ error: "Could not generate this summary. Try again." }, { status: 500 });
   }

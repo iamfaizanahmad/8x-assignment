@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { FileAudio, Loader2, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { MAX_UPLOAD_DURATION_S } from "@/lib/limits";
 
 type Phase = { kind: "idle" } | { kind: "uploading"; progress: number; name: string } | { kind: "error"; message: string };
 
@@ -16,6 +17,29 @@ function putWithProgress(url: string, file: File, onProgress: (p: number) => voi
     xhr.onload = () => (xhr.status < 300 ? resolve() : reject(new Error(`Upload failed (${xhr.status})`)));
     xhr.onerror = () => reject(new Error("Upload failed — check your connection"));
     xhr.send(file);
+  });
+}
+
+/** Duration from the file's own metadata, before uploading anything. Null when the browser can't decode the format. */
+function readDuration(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const el = document.createElement(file.type.startsWith("video/") ? "video" : "audio");
+    const done = (d: number | null) => {
+      URL.revokeObjectURL(url);
+      resolve(d);
+    };
+    const timer = setTimeout(() => done(null), 8000);
+    el.preload = "metadata";
+    el.onloadedmetadata = () => {
+      clearTimeout(timer);
+      done(Number.isFinite(el.duration) ? el.duration : null);
+    };
+    el.onerror = () => {
+      clearTimeout(timer);
+      done(null);
+    };
+    el.src = url;
   });
 }
 
@@ -52,18 +76,35 @@ export function UploadDialog({
   async function start(file: File) {
     if (!/^(audio|video)\//.test(file.type)) return setPhase({ kind: "error", message: "Please choose an audio or video file." });
     setPhase({ kind: "uploading", progress: 0, name: file.name });
+    let meetingId: string | null = null;
     try {
+      const durationS = await readDuration(file);
+      if (durationS != null && durationS > MAX_UPLOAD_DURATION_S)
+        throw new Error(`This recording is ${Math.round(durationS / 60)} minutes. The demo accepts up to ${MAX_UPLOAD_DURATION_S / 60}.`);
+
       const res = await fetch("/api/uploads", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ filename: file.name, contentType: file.type, size: file.size, calendarEventId: event?.id }),
+        body: JSON.stringify({ filename: file.name, contentType: file.type, size: file.size, durationS, calendarEventId: event?.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not start upload");
-      await putWithProgress(data.uploadUrl, file, (p) => setPhase({ kind: "uploading", progress: p, name: file.name }));
-      await fetch(`/api/meetings/${data.id}/process`, { method: "POST" });
+      meetingId = data.id;
+
+      try {
+        await putWithProgress(data.uploadUrl, file, (p) => setPhase({ kind: "uploading", progress: p, name: file.name }));
+      } catch (err) {
+        // The file never arrived: remove the empty meeting instead of leaving it stuck in the list.
+        await fetch(`/api/meetings/${data.id}`, { method: "DELETE" }).catch(() => {});
+        meetingId = null;
+        throw err;
+      }
+
+      // Even if starting processing fails, the meeting page shows its state and offers Retry.
+      await fetch(`/api/meetings/${data.id}/process`, { method: "POST" }).catch(() => {});
       router.push(`/meetings/${data.id}`);
     } catch (err) {
+      if (meetingId) router.push(`/meetings/${meetingId}`);
       setPhase({ kind: "error", message: err instanceof Error ? err.message : "Upload failed" });
     }
   }

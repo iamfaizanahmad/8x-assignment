@@ -51,14 +51,17 @@ export function HighlightsPanel({
               >
                 <Share2 className="size-3.5" /> Share clip
               </button>
+              {!h.locked && (
               <button onClick={() => onDelete(h)} className="rounded-md p-1 text-zinc-400 hover:bg-red-50 hover:text-red-600" title="Delete">
                 <Trash2 className="size-3.5" />
               </button>
+              )}
             </div>
             <input
+              readOnly={h.locked}
               defaultValue={h.note ?? ""}
               placeholder="Add a note…"
-              onBlur={(e) => e.target.value !== (h.note ?? "") && onNote(h, e.target.value)}
+              onBlur={(e) => !h.locked && e.target.value !== (h.note ?? "") && onNote(h, e.target.value)}
               className="mt-2 w-full rounded-md px-1 py-0.5 text-sm font-medium outline-none placeholder:font-normal placeholder:text-zinc-400 focus:bg-zinc-50"
             />
             {quote && <p className="mt-1 line-clamp-3 px-1 text-sm text-zinc-600">“{quote}”</p>}

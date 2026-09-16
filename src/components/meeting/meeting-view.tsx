@@ -5,6 +5,7 @@ import { ArrowLeft, Calendar, Clock, Loader2, RotateCw, Share2, Sparkles, Star, 
 import { DeleteMeetingDialog } from "@/components/delete-meeting";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { STALE_PROCESSING_MS, STALE_UPLOAD_MS } from "@/lib/limits";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SummaryContent, TemplateId } from "@/db/schema";
 import type { MeetingDetail } from "@/lib/queries";
@@ -29,18 +30,40 @@ type Tab = "summary" | "transcript" | "actions" | "highlights";
 const CLIP_BEFORE_MS = 15_000;
 const CLIP_AFTER_MS = 5_000;
 
-function Processing({ meetingId, status, error }: { meetingId: string; status: string; error: string | null }) {
+function Processing({
+  meetingId,
+  status,
+  error,
+  statusUpdatedAt,
+}: {
+  meetingId: string;
+  status: string;
+  error: string | null;
+  statusUpdatedAt: Date;
+}) {
   const router = useRouter();
   const [retrying, setRetrying] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     if (status === "failed") return;
     const t = setInterval(async () => {
+      setNow(Date.now());
       const r = await fetch(`/api/meetings/${meetingId}/process`).then((r) => r.json()).catch(() => null);
-      if (r && r.status !== status) router.refresh();
+      if (r && (r.status !== status || new Date(r.statusUpdatedAt).getTime() !== new Date(statusUpdatedAt).getTime())) router.refresh();
     }, 3000);
     return () => clearInterval(t);
-  }, [meetingId, status, router]);
+  }, [meetingId, status, statusUpdatedAt, router]);
+
+  const age = now - new Date(statusUpdatedAt).getTime();
+  const stuck = (status === "uploaded" && age > STALE_UPLOAD_MS) || (status !== "uploaded" && status !== "failed" && age > STALE_PROCESSING_MS);
+
+  const retry = async () => {
+    setRetrying(true);
+    await fetch(`/api/meetings/${meetingId}/process`, { method: "POST" }).catch(() => {});
+    setRetrying(false);
+    router.refresh();
+  };
 
   const steps = [
     { key: "uploaded", label: "Uploaded" },
@@ -58,11 +81,7 @@ function Processing({ meetingId, status, error }: { meetingId: string; status: s
         <p className="mt-1 text-sm text-red-700">{error ?? "Something went wrong."}</p>
         <button
           disabled={retrying}
-          onClick={async () => {
-            setRetrying(true);
-            await fetch(`/api/meetings/${meetingId}/process`, { method: "POST" });
-            router.refresh();
-          }}
+          onClick={retry}
           className="mt-3 inline-flex items-center gap-2 rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-red-800 shadow-sm ring-1 ring-red-200 hover:bg-red-100"
         >
           <RotateCw className={clsx("size-4", retrying && "animate-spin")} /> Retry
@@ -73,6 +92,21 @@ function Processing({ meetingId, status, error }: { meetingId: string; status: s
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-5">
       <p className="mb-4 text-sm text-zinc-600">Processing your recording. This usually takes under a minute.</p>
+      {stuck && (
+        <div className="mb-4 flex items-center gap-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+          <TriangleAlert className="size-4 shrink-0" />
+          <span className="flex-1">
+            {status === "uploaded" ? "Processing never started. The upload may have been interrupted." : "This is taking longer than it should."}
+          </span>
+          <button
+            disabled={retrying}
+            onClick={retry}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-white px-2.5 py-1 font-medium shadow-sm ring-1 ring-amber-200 hover:bg-amber-100"
+          >
+            <RotateCw className={clsx("size-3.5", retrying && "animate-spin")} /> Retry
+          </button>
+        </div>
+      )}
       <ol className="space-y-3">
         {steps.map((s, i) => (
           <li key={s.key} className="flex items-center gap-3 text-sm">
@@ -161,11 +195,17 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
 
   async function rename(s: Speaker, name: string) {
     setSpeakers((all) => all.map((x) => (x.id === s.id ? { ...x, displayName: name || null } : x)));
-    await fetch(`/api/speakers/${s.id}`, {
+    const res = await fetch(`/api/speakers/${s.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ displayName: name }),
     });
+    if (!res.ok) {
+      setSpeakers((all) => all.map((x) => (x.id === s.id ? { ...x, displayName: s.displayName } : x)));
+      return flash("Could not rename speaker");
+    }
+    // Notes were written with the old name; offer to refresh them.
+    setSpeakersEdited(true);
   }
 
   async function reassign(seg: Segment, target: number | "new") {
@@ -200,6 +240,8 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
   }
 
   const ready = meeting.status === "ready";
+  // Seeded showcase meetings stay intact for every reviewer: highlight and share, but no structural edits.
+  const isSample = meeting.source === "seed";
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: "summary", label: "Summary" },
     { id: "transcript", label: "Transcript" },
@@ -274,10 +316,16 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
                 segments={segments}
                 onSeek={(ms) => player.seek(ms)}
               />
-              <SpeakersPanel speakers={speakers} onRename={rename} />
+              <SpeakersPanel speakers={speakers} onRename={rename} readOnly={isSample} />
+              {isSample && (
+                <p className="px-1 text-xs text-zinc-500">
+                  Sample meeting: speaker edits are disabled on the public demo so every visitor sees the same data. Highlights and sharing
+                  work.
+                </p>
+              )}
             </>
           ) : (
-            <Processing meetingId={meeting.id} status={meeting.status} error={meeting.error} />
+            <Processing meetingId={meeting.id} status={meeting.status} error={meeting.error} statusUpdatedAt={meeting.statusUpdatedAt} />
           )}
         </div>
 
@@ -329,8 +377,8 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
                   currentMs={player.currentMs}
                   onSeek={(ms) => player.seek(ms)}
                   onHighlight={(seg: Segment) => addHighlight(seg.startMs, seg.endMs)}
-                  onReassign={reassign}
-                  onSplit={split}
+                  onReassign={isSample ? undefined : reassign}
+                  onSplit={isSample ? undefined : split}
                 />
               )}
               {tab === "actions" && <ActionItemsPanel items={data.actionItems} onSeek={(ms) => player.seek(ms)} />}

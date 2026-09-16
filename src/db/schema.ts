@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   primaryKey,
+  uniqueIndex,
   customType,
   index,
   integer,
@@ -33,11 +34,14 @@ export const meetings = pgTable("meetings", {
   mediaKey: text("media_key"),
   mediaType: text("media_type"),
   status: text("status").$type<MeetingStatus>().notNull().default("uploaded"),
+  statusUpdatedAt: timestamp("status_updated_at", { withTimezone: true }).notNull().defaultNow(),
   error: text("error"),
   source: text("source").$type<"upload" | "seed">().notNull().default("upload"),
   chapters: jsonb("chapters").$type<Chapter[]>().notNull().default([]),
   calendarEventId: text("calendar_event_id"),
   attendees: jsonb("attendees").$type<string[]>().notNull().default([]),
+  /** Salted hash of the uploader's IP, only for per-visitor rate limiting. */
+  uploaderHash: text("uploader_hash"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -79,7 +83,7 @@ export const summaries = pgTable(
     content: jsonb("content").$type<SummaryContent>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("summaries_meeting_template_idx").on(t.meetingId, t.template)],
+  (t) => [uniqueIndex("summaries_meeting_template_uq").on(t.meetingId, t.template)],
 );
 
 export const actionItems = pgTable("action_items", {
@@ -97,6 +101,8 @@ export const highlights = pgTable("highlights", {
   startMs: integer("start_ms").notNull(),
   endMs: integer("end_ms").notNull(),
   note: text("note"),
+  /** Seeded showcase highlights can't be edited or deleted by visitors. */
+  locked: boolean("locked").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

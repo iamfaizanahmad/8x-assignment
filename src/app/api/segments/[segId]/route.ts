@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db, speakers, transcriptSegments } from "@/db";
+import { rejectIfSample } from "@/lib/guards";
 
 const body = z.union([z.object({ speakerId: z.number().int() }), z.object({ newSpeaker: z.literal(true) })]);
 
@@ -14,6 +15,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ segId:
   const [segment] = await db.select().from(transcriptSegments).where(eq(transcriptSegments.id, Number(segId)));
   if (!segment) return NextResponse.json({ error: "Not found" }, { status: 404 });
   const meetingId = segment.meetingId;
+  const blocked = await rejectIfSample(meetingId);
+  if (blocked) return blocked;
   const existing = await db.select().from(speakers).where(eq(speakers.meetingId, meetingId));
 
   let targetId: number;

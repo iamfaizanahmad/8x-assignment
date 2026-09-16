@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { actionItems, db, meetings, summaries } from "@/db";
+import { rejectIfSample } from "@/lib/guards";
 import { analyzeMeeting } from "@/lib/pipeline/ai";
 import { loadTranscriptText } from "@/lib/pipeline";
 
@@ -9,6 +10,8 @@ export const maxDuration = 120;
 /** Re-run notes after speaker fixes: one Claude call; other templates regenerate lazily when opened. */
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const blocked = await rejectIfSample(id);
+  if (blocked) return blocked;
   const [meeting] = await db.select().from(meetings).where(eq(meetings.id, id));
   if (!meeting) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (meeting.status !== "ready") return NextResponse.json({ error: "Meeting is still processing" }, { status: 409 });
