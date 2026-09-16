@@ -19,7 +19,7 @@ import { signUpload } from "@/lib/storage";
 const body = z.object({
   filename: z.string().min(1).max(200),
   contentType: z.string().regex(/^(audio|video)\//, "Only audio or video files are supported"),
-  size: z.number().int().positive().max(MAX_UPLOAD_BYTES, "File is larger than 500 MB"),
+  size: z.number().int().positive().max(MAX_UPLOAD_BYTES, "File is larger than 2 GB"),
   /** Read by the browser from the file's metadata before uploading; null if it couldn't be read. */
   durationS: z.number().nonnegative().nullable().optional(),
   calendarEventId: z.string().max(1024).optional(),
@@ -93,5 +93,5 @@ export async function POST(req: Request) {
     uploaderHash,
     ...(startedAt ? { startedAt } : {}),
   });
-  return NextResponse.json({ id, uploadUrl: await signUpload(mediaKey, contentType) });
+  return NextResponse.json({ id, uploadUrl: await signUpload(mediaKey, contentType, 60 * 60) });
 }

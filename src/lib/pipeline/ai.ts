@@ -57,7 +57,7 @@ function toSummary(raw: RawSummary): SummaryContent {
 async function callTool<T>(name: string, description: string, schema: object, prompt: string): Promise<T> {
   const res = await client.messages.create({
     model: model(),
-    max_tokens: 8000,
+    max_tokens: 16000,
     system: SYSTEM,
     tools: [{ name, description, input_schema: schema as Anthropic.Tool.InputSchema }],
     tool_choice: { type: "tool", name },

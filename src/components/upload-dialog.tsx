@@ -170,7 +170,7 @@ export function UploadDialog({
             >
               <Upload className="size-6 text-zinc-400" />
               <span className="font-medium">Drop a file or click to browse</span>
-              <span className="text-xs text-zinc-500">MP4, MOV, WebM, MP3, M4A, WAV · up to 20 minutes</span>
+              <span className="text-xs text-zinc-500">MP4, MOV, WebM, MP3, M4A, WAV · up to 90 minutes, 2 GB</span>
             </button>
             {phase.kind === "error" && <p className="mt-3 text-sm text-red-600">{phase.message}</p>}
             <input
