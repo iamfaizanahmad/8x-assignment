@@ -59,10 +59,13 @@ function Processing({
   const age = now - new Date(statusUpdatedAt).getTime();
   const stuck = (status === "uploaded" && age > STALE_UPLOAD_MS) || (status !== "uploaded" && status !== "failed" && age > STALE_PROCESSING_MS);
 
+  const [retryNote, setRetryNote] = useState<string | null>(null);
   const retry = async () => {
     setRetrying(true);
-    await fetch(`/api/meetings/${meetingId}/process`, { method: "POST" }).catch(() => {});
+    setRetryNote(null);
+    const res = await fetch(`/api/meetings/${meetingId}/process`, { method: "POST" }).catch(() => null);
     setRetrying(false);
+    if (res?.status === 409) return setRetryNote("The file hasn't finished uploading yet. Check again once the upload completes.");
     router.refresh();
   };
 
@@ -97,14 +100,17 @@ function Processing({
         <div className="mb-4 flex items-center gap-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
           <TriangleAlert className="size-4 shrink-0" />
           <span className="flex-1">
-            {status === "uploaded" ? "Processing never started. The upload may have been interrupted." : "This is taking longer than it should."}
+            {status === "uploaded"
+              ? retryNote ??
+                "Waiting for the recording to finish uploading. Large files can take a while; keep the uploading tab open. If the upload was interrupted, check again below."
+              : "This is taking longer than it should."}
           </span>
           <button
             disabled={retrying}
             onClick={retry}
             className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-white px-2.5 py-1 font-medium shadow-sm ring-1 ring-amber-200 hover:bg-amber-100"
           >
-            <RotateCw className={clsx("size-3.5", retrying && "animate-spin")} /> Retry
+            <RotateCw className={clsx("size-3.5", retrying && "animate-spin")} /> {status === "uploaded" ? "Check again" : "Retry"}
           </button>
         </div>
       )}

@@ -34,7 +34,7 @@ export async function processMeeting(id: string) {
   try {
     await setStatus(id, "transcribing");
     if (!(await objectExists(meeting.mediaKey)))
-      throw new Error("The recording never finished uploading. Delete this meeting and upload the file again.");
+      throw new Error("The recording file isn't in storage. If it was still uploading, wait for it to finish and retry; otherwise upload it again.");
     const { durationS, segments } = await transcribeUrl(await signDownload(meeting.mediaKey, 60 * 60));
     if (segments.length === 0) throw new Error("No speech detected in this recording");
     // Backstop only: the upload API already rejects long files using the duration the browser reads before uploading.
