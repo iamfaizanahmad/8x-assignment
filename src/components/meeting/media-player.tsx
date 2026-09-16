@@ -20,7 +20,12 @@ export function MediaPlayer({
   const [failed, setFailed] = useState(false);
   const isVideo = mediaType?.startsWith("video/");
 
-  if (!src) return <div className="grid aspect-video place-items-center rounded-xl bg-zinc-900 text-sm text-zinc-400">No recording</div>;
+  if (!src)
+    return (
+      <div className="grid aspect-video place-items-center rounded-xl bg-zinc-900 text-sm text-zinc-400">
+        No recording
+      </div>
+    );
 
   // Signed URLs expire after a few hours; a refresh re-signs them.
   const onError = () => setFailed(true);
@@ -40,13 +45,24 @@ export function MediaPlayer({
           </button>
         </div>
       ) : isVideo ? (
-        <video ref={player.mediaRef} src={src} controls playsInline preload="metadata" onError={onError} className="aspect-video w-full bg-black" />
+        <video
+          ref={player.mediaRef}
+          src={src}
+          controls
+          playsInline
+          preload="metadata"
+          onError={onError}
+          className="aspect-video w-full bg-black"
+        />
       ) : (
         <div className="flex aspect-video flex-col justify-between bg-gradient-to-br from-brand-700 via-brand-600 to-indigo-900 p-5 text-white">
           <div className="flex items-center gap-2 text-sm text-white/80">
             <AudioLines className="size-4" /> Audio recording
           </div>
-          <div className="flex h-16 items-end justify-center gap-[3px]" aria-hidden>
+          <div
+            className="flex h-16 items-end justify-center gap-[3px]"
+            aria-hidden
+          >
             {Array.from({ length: 48 }, (_, i) => (
               <span
                 key={i}
@@ -59,7 +75,14 @@ export function MediaPlayer({
           </div>
           <div>
             <p className="mb-2 truncate text-sm font-medium">{title}</p>
-            <audio ref={player.mediaRef} src={src} controls preload="metadata" onError={onError} className="w-full" />
+            <audio
+              ref={player.mediaRef}
+              src={src}
+              controls
+              preload="metadata"
+              onError={onError}
+              className="w-full"
+            />
           </div>
         </div>
       )}
