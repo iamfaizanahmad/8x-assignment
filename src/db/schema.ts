@@ -29,7 +29,7 @@ export const meetings = pgTable("meetings", {
   title: text("title").notNull(),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   durationS: integer("duration_s").notNull().default(0),
-  mediaUrl: text("media_url"),
+  mediaKey: text("media_key"),
   mediaType: text("media_type"),
   status: text("status").$type<MeetingStatus>().notNull().default("uploaded"),
   error: text("error"),
