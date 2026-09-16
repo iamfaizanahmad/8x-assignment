@@ -7,3 +7,8 @@ export const UPLOADS_PER_HOUR_PER_VISITOR = 3;
 /** "uploaded" rows older than this never got their file; transcribing/summarizing older than STALE_PROCESSING died. */
 export const STALE_UPLOAD_MS = 60_000;
 export const STALE_PROCESSING_MS = 6 * 60_000;
+export const ASK_PER_HOUR_PER_VISITOR = 30;
+export const ASK_PER_HOUR_GLOBAL = 300;
+export const ASK_MAX_QUESTION_CHARS = 500;
+/** Library-wide questions include whole transcripts up to this size (~60k tokens), summaries beyond it. */
+export const ASK_LIBRARY_TRANSCRIPT_CHARS = 240_000;

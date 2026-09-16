@@ -1,6 +1,8 @@
-import { FileText, Search } from "lucide-react";
+import clsx from "clsx";
+import { FileText, Search, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { searchTranscripts, type SearchHit } from "@/lib/queries";
+import { AskPanel } from "@/components/ask-panel";
+import { listMeetings, searchTranscripts, type SearchHit } from "@/lib/queries";
 import { formatMs } from "@/lib/time";
 import { LocalTime } from "@/components/local-time";
 
@@ -26,8 +28,27 @@ function Snippet({ html }: { html: string }) {
   );
 }
 
-export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  const q = ((await searchParams).q ?? "").trim();
+/** Natural-language questions deserve an AI answer, not keyword hits. */
+const looksLikeQuestion = (q: string) =>
+  /\?\s*$/.test(q) || /^(what|who|whom|when|where|why|how|which|did|does|do|is|are|was|were|can|could|should|summari[sz]e|tell me|list|give me)\b/i.test(q);
+
+export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string; mode?: string }> }) {
+  const sp = await searchParams;
+  const q = (sp.q ?? "").trim();
+  const mode = sp.mode === "ask" ? "ask" : "search";
+
+  if (mode === "ask") {
+    const meetings = (await listMeetings()).filter((m) => m.status === "ready").map((m) => ({ id: m.id, title: m.title }));
+    return (
+      <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+        <ModeTabs mode="ask" q={q} />
+        <div className="h-[calc(100vh-12rem)] min-h-[480px] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+          <AskPanel scope="library" meetings={meetings} initialQuestion={q || undefined} />
+        </div>
+      </main>
+    );
+  }
+
   const { hits, titleMatches } = await searchTranscripts(q);
 
   const byMeeting = new Map<string, { title: string; startedAt: Date; hits: SearchHit[] }>();
@@ -39,6 +60,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+      <ModeTabs mode="search" q={q} />
       <form action="/search" className="mb-6">
         <label className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 shadow-sm focus-within:border-brand-500">
           <Search className="size-5 text-zinc-400" />
@@ -54,6 +76,21 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
           Searches every transcript. Use quotes for exact phrases, <code>-word</code> to exclude, <code>or</code> for either.
         </p>
       </form>
+
+      {q && looksLikeQuestion(q) && (
+        <Link
+          href={`/search?mode=ask&q=${encodeURIComponent(q)}`}
+          className="mb-6 flex items-center gap-3 rounded-xl border border-brand-200 bg-brand-50 p-4 hover:border-brand-500"
+        >
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-white">
+            <Sparkles className="size-4 text-brand-600" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium text-brand-800">Ask AI instead</span>
+            <span className="block truncate text-sm text-brand-700">“{q}” — get an answer with links to the moments</span>
+          </span>
+        </Link>
+      )}
 
       {!q ? null : hits.length === 0 && titleMatches.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-300 bg-white p-10 text-center text-sm text-zinc-500">
@@ -114,5 +151,24 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         </div>
       )}
     </main>
+  );
+}
+
+function ModeTabs({ mode, q }: { mode: "search" | "ask"; q: string }) {
+  const qs = q ? `&q=${encodeURIComponent(q)}` : "";
+  const tab = (active: boolean) =>
+    clsx(
+      "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition",
+      active ? "bg-white font-medium text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-800",
+    );
+  return (
+    <div className="mb-5 inline-flex rounded-xl bg-zinc-100 p-1">
+      <Link href={`/search?mode=search${qs}`} className={tab(mode === "search")}>
+        <Search className="size-4" /> Search transcripts
+      </Link>
+      <Link href="/search?mode=ask" className={tab(mode === "ask")}>
+        <Sparkles className="size-4 text-brand-600" /> Ask AI
+      </Link>
+    </div>
   );
 }

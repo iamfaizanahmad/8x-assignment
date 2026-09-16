@@ -141,3 +141,21 @@ export const calendarEventOverrides = pgTable(
   },
   (t) => [primaryKey({ columns: [t.connectionId, t.eventId] })],
 );
+
+/** Every "Ask" question: rate limiting per visitor, and identical questions over unchanged context reuse the answer. */
+export const askLog = pgTable(
+  "ask_log",
+  {
+    id: serial("id").primaryKey(),
+    visitorHash: text("visitor_hash").notNull(),
+    meetingId: text("meeting_id"),
+    cacheKey: text("cache_key").notNull(),
+    question: text("question").notNull(),
+    answer: text("answer"),
+    inputTokens: integer("input_tokens"),
+    cachedInputTokens: integer("cached_input_tokens"),
+    outputTokens: integer("output_tokens"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("ask_log_cache_key_idx").on(t.cacheKey), index("ask_log_created_idx").on(t.createdAt)],
+);

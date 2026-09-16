@@ -2,6 +2,7 @@
 
 import clsx from "clsx";
 import { ArrowLeft, Calendar, Clock, Loader2, RotateCw, Share2, Sparkles, Star, Trash2, TriangleAlert } from "lucide-react";
+import { AskPanel } from "@/components/ask-panel";
 import { DeleteMeetingDialog } from "@/components/delete-meeting";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -25,7 +26,7 @@ import { TranscriptPanel } from "./transcript-panel";
 import type { Highlight, Segment, Speaker } from "./types";
 import { usePlayer } from "./use-player";
 
-type Tab = "summary" | "transcript" | "actions" | "highlights";
+type Tab = "summary" | "ask" | "transcript" | "actions" | "highlights";
 
 const CLIP_BEFORE_MS = 15_000;
 const CLIP_AFTER_MS = 5_000;
@@ -244,6 +245,7 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
   const isSample = meeting.source === "seed";
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: "summary", label: "Summary" },
+    { id: "ask", label: "Ask AI" },
     { id: "transcript", label: "Transcript" },
     { id: "actions", label: "Action items", count: data.actionItems.length },
     { id: "highlights", label: "Highlights", count: highlights.length },
@@ -331,16 +333,17 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
 
         {ready && (
           <div className="flex h-[calc(100vh-7rem)] min-h-[520px] flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white lg:sticky lg:top-[4.5rem]">
-            <div className="flex shrink-0 gap-1 border-b border-zinc-100 px-2">
+            <div className="scroll-thin flex shrink-0 gap-1 overflow-x-auto border-b border-zinc-100 px-2">
               {tabs.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
                   className={clsx(
-                    "relative px-3 py-3 text-sm transition",
+                    "relative shrink-0 whitespace-nowrap px-3 py-3 text-sm transition",
                     tab === t.id ? "font-medium text-zinc-900" : "text-zinc-500 hover:text-zinc-800",
                   )}
                 >
+                  {t.id === "ask" && <Sparkles className="mr-1 inline size-3.5 -translate-y-px text-brand-600" />}
                   {t.label}
                   {t.count ? <span className="ml-1.5 rounded-full bg-zinc-100 px-1.5 text-xs text-zinc-600">{t.count}</span> : null}
                   {tab === t.id && <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-brand-600" />}
@@ -361,6 +364,10 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
               </div>
             )}
             <div className="min-h-0 flex-1" key={notesVersion}>
+              {/* Kept mounted so the conversation survives switching tabs. */}
+              <div className={clsx("h-full", tab !== "ask" && "hidden")}>
+                <AskPanel scope="meeting" meetingId={meeting.id} onSeek={(ms) => player.seek(ms)} />
+              </div>
               {tab === "summary" && (
                 <SummaryPanel
                   meetingId={meeting.id}

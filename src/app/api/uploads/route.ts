@@ -1,4 +1,3 @@
-import { createHash } from "crypto";
 import { and, eq, gt, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { NextResponse } from "next/server";
@@ -14,6 +13,7 @@ import {
   UPLOADS_PER_HOUR_PER_VISITOR,
 } from "@/lib/limits";
 import { signUpload } from "@/lib/storage";
+import { visitorHash } from "@/lib/visitor";
 
 
 const body = z.object({
@@ -40,8 +40,7 @@ export async function POST(req: Request) {
       { status: 400 },
     );
 
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "unknown";
-  const uploaderHash = createHash("sha256").update(`${process.env.TOKEN_ENCRYPTION_KEY}:${ip}`).digest("hex").slice(0, 32);
+  const uploaderHash = visitorHash(req);
 
   // Serverless has no shared memory, so rate limits count recent uploads in Postgres.
   // Uploads abandoned before the file arrived don't count against anyone.
