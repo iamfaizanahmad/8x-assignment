@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowLeft, Calendar, Clock, Loader2, RotateCw, Share2, Star, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Loader2, RotateCw, Share2, Sparkles, Star, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -94,12 +94,20 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
   const { meeting } = data;
   const player = usePlayer({ initialMs });
   const [tab, setTab] = useState<Tab>(initialMs ? "transcript" : "summary");
+  const router = useRouter();
   const [speakers, setSpeakers] = useState<Speaker[]>(data.speakers);
+  const [segments, setSegments] = useState<Segment[]>(data.segments);
+  const [speakersEdited, setSpeakersEdited] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [notesVersion, setNotesVersion] = useState(0);
   const [highlights, setHighlights] = useState<Highlight[]>(data.highlights);
   const [share, setShare] = useState<ShareTarget | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => setSpeakers(data.speakers), [data.speakers]);
+  useEffect(() => setSegments(data.segments), [data.segments]);
+  // Panels keep their own state; remount them when fresh notes arrive from the server.
+  useEffect(() => setNotesVersion((v) => v + 1), [data.summaries, data.actionItems]);
 
   const durationMs = player.durationMs || meeting.durationS * 1000;
   const initialSummaries = useMemo(
@@ -156,6 +164,37 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ displayName: name }),
     });
+  }
+
+  async function reassign(seg: Segment, target: number | "new") {
+    const res = await fetch(`/api/segments/${seg.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(target === "new" ? { newSpeaker: true } : { speakerId: target }),
+    });
+    if (!res.ok) return flash("Could not change speaker");
+    const r: { segmentId: number; speakerId: number; speakers: Speaker[] } = await res.json();
+    setSegments((all) => all.map((s) => (s.id === r.segmentId ? { ...s, speakerId: r.speakerId } : s)));
+    setSpeakers([...r.speakers].sort((a, b) => b.talkTimeS - a.talkTimeS));
+    setSpeakersEdited(true);
+  }
+
+  async function split(seg: Segment) {
+    const res = await fetch(`/api/segments/${seg.id}/split`, { method: "POST" });
+    if (!res.ok) return flash("Could not split this line");
+    const r: { removedId: number; segments: Segment[] } = await res.json();
+    setSegments((all) => [...all.filter((s) => s.id !== r.removedId), ...r.segments].sort((a, b) => a.startMs - b.startMs));
+    flash(`Split into ${r.segments.length} lines — now set who said each`);
+  }
+
+  async function regenerate() {
+    setRegenerating(true);
+    const res = await fetch(`/api/meetings/${meeting.id}/regenerate`, { method: "POST" });
+    setRegenerating(false);
+    if (!res.ok) return flash("Could not regenerate notes");
+    setSpeakersEdited(false);
+    router.refresh();
+    flash("Notes updated with the corrected speakers");
   }
 
   const ready = meeting.status === "ready";
@@ -218,7 +257,7 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
                 chapters={meeting.chapters}
                 highlights={highlights}
                 speakers={speakers}
-                segments={data.segments}
+                segments={segments}
                 onSeek={(ms) => player.seek(ms)}
               />
               <SpeakersPanel speakers={speakers} onRename={rename} />
@@ -246,7 +285,20 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
                 </button>
               ))}
             </div>
-            <div className="min-h-0 flex-1">
+            {speakersEdited && (
+              <div className="flex shrink-0 items-center gap-3 border-b border-brand-100 bg-brand-50 px-4 py-2 text-xs text-brand-800">
+                <span className="flex-1">Speakers changed. Summary and action items still use the old attribution.</span>
+                <button
+                  onClick={regenerate}
+                  disabled={regenerating}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-brand-600 px-2.5 py-1 font-medium text-white hover:bg-brand-700 disabled:opacity-60"
+                >
+                  {regenerating ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                  {regenerating ? "Updating…" : "Update notes"}
+                </button>
+              </div>
+            )}
+            <div className="min-h-0 flex-1" key={notesVersion}>
               {tab === "summary" && (
                 <SummaryPanel
                   meetingId={meeting.id}
@@ -258,18 +310,20 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
               )}
               {tab === "transcript" && (
                 <TranscriptPanel
-                  segments={data.segments}
+                  segments={segments}
                   speakers={speakers}
                   currentMs={player.currentMs}
                   onSeek={(ms) => player.seek(ms)}
                   onHighlight={(seg: Segment) => addHighlight(seg.startMs, seg.endMs)}
+                  onReassign={reassign}
+                  onSplit={split}
                 />
               )}
               {tab === "actions" && <ActionItemsPanel items={data.actionItems} onSeek={(ms) => player.seek(ms)} />}
               {tab === "highlights" && (
                 <HighlightsPanel
                   highlights={highlights}
-                  segments={data.segments}
+                  segments={segments}
                   onSeek={(ms) => player.seek(ms)}
                   onShare={(h) => setShare({ kind: "clip", startMs: h.startMs, endMs: h.endMs })}
                   onDelete={async (h) => {

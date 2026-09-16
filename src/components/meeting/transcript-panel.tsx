@@ -2,7 +2,7 @@
 
 import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
-import { Search, Star, X } from "lucide-react";
+import { Check, ChevronDown, Scissors, Search, Star, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SpeakerAvatar, speakerIndex } from "@/components/speaker-avatars";
 import { formatMs } from "@/lib/time";
@@ -33,6 +33,8 @@ export function TranscriptPanel({
   currentMs,
   onSeek,
   onHighlight,
+  onReassign,
+  onSplit,
   bounds,
 }: {
   segments: Segment[];
@@ -40,11 +42,29 @@ export function TranscriptPanel({
   currentMs: number;
   onSeek: (ms: number) => void;
   onHighlight?: (seg: Segment) => void;
+  /** Fix diarization: move a line to another speaker, or to a new one. */
+  onReassign?: (seg: Segment, target: number | "new") => Promise<void>;
+  onSplit?: (seg: Segment) => Promise<void>;
   bounds?: { startMs: number; endMs: number };
 }) {
   const [speakerFilter, setSpeakerFilter] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [follow, setFollow] = useState(true);
+  const [menuFor, setMenuFor] = useState<number | null>(null);
+  const [saving, setSaving] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (menuFor === null) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !(e.target as HTMLElement).closest("[data-speaker-menu]")) setMenuFor(null);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", close);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", close);
+    };
+  }, [menuFor]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const userScrollAt = useRef(0);
   const byId = useMemo(() => new Map(speakers.map((s) => [s.id, s])), [speakers]);
@@ -164,9 +184,70 @@ export function TranscriptPanel({
                     {speaker ? <SpeakerAvatar speaker={speaker} /> : <span className="size-6" />}
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-xs">
-                        <span className={clsx("font-medium", speaker && speakerColor(speakerIndex(speaker)).text)}>
-                          {speaker ? speakerName(speaker) : "Unknown"}
-                        </span>
+                        {onReassign ? (
+                          <span className="relative" data-speaker-menu onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => setMenuFor(menuFor === seg.id ? null : seg.id)}
+                              title="Wrong speaker? Change it"
+                              className={clsx(
+                                "inline-flex items-center gap-0.5 rounded px-1 -mx-1 font-medium hover:bg-zinc-100",
+                                speaker && speakerColor(speakerIndex(speaker)).text,
+                              )}
+                            >
+                              {speaker ? speakerName(speaker) : "Unknown"}
+                              <ChevronDown className="size-3 opacity-0 transition group-hover:opacity-60" />
+                            </button>
+                            {menuFor === seg.id && (
+                              <div className="absolute left-0 top-full z-30 mt-1 max-h-64 w-52 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1 text-sm shadow-lg">
+                                <p className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400">Who said this?</p>
+                                {speakers.map((s) => (
+                                  <button
+                                    key={s.id}
+                                    disabled={saving === seg.id}
+                                    onClick={async () => {
+                                      setMenuFor(null);
+                                      if (s.id === seg.speakerId) return;
+                                      setSaving(seg.id);
+                                      await onReassign(seg, s.id).finally(() => setSaving(null));
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-zinc-700 hover:bg-zinc-50"
+                                  >
+                                    <span className={clsx("size-2 shrink-0 rounded-full", speakerColor(speakerIndex(s)).bg)} />
+                                    <span className="flex-1 truncate">{speakerName(s)}</span>
+                                    {s.id === seg.speakerId && <Check className="size-3.5 text-brand-600" />}
+                                  </button>
+                                ))}
+                                <button
+                                  onClick={async () => {
+                                    setMenuFor(null);
+                                    setSaving(seg.id);
+                                    await onReassign(seg, "new").finally(() => setSaving(null));
+                                  }}
+                                  className="mt-1 flex w-full items-center gap-2 rounded-lg border-t border-zinc-100 px-2.5 py-1.5 text-left text-zinc-700 hover:bg-zinc-50"
+                                >
+                                  <UserPlus className="size-3.5 text-zinc-400" /> New speaker
+                                </button>
+                                {onSplit && /[.?!]\s+\S/.test(seg.text) && (
+                                  <button
+                                    onClick={async () => {
+                                      setMenuFor(null);
+                                      setSaving(seg.id);
+                                      await onSplit(seg).finally(() => setSaving(null));
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-zinc-700 hover:bg-zinc-50"
+                                    title="Two people in one line? Split it, then fix each part"
+                                  >
+                                    <Scissors className="size-3.5 text-zinc-400" /> Split into sentences
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </span>
+                        ) : (
+                          <span className={clsx("font-medium", speaker && speakerColor(speakerIndex(speaker)).text)}>
+                            {speaker ? speakerName(speaker) : "Unknown"}
+                          </span>
+                        )}
                         <span className="tabular-nums text-zinc-400">{formatMs(seg.startMs)}</span>
                         {onHighlight && (
                           <button
@@ -181,7 +262,7 @@ export function TranscriptPanel({
                           </button>
                         )}
                       </div>
-                      <p className={clsx("mt-0.5 text-sm leading-relaxed", active ? "text-zinc-900" : "text-zinc-700")}>
+                      <p className={clsx("mt-0.5 text-sm leading-relaxed", active ? "text-zinc-900" : "text-zinc-700", saving === seg.id && "opacity-50")}>
                         <Highlighted text={seg.text} query={query.trim()} />
                       </p>
                     </div>
