@@ -1,5 +1,6 @@
 import { CheckSquare, Clock, Loader2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
+import { DeleteMeetingButton } from "@/components/delete-meeting";
 import { SpeakerAvatars } from "@/components/speaker-avatars";
 import { UploadButton } from "@/components/upload-dialog";
 import { listMeetings, type MeetingListItem } from "@/lib/queries";
@@ -66,7 +67,7 @@ export default async function MeetingsPage() {
             <ul className="divide-y divide-zinc-100 overflow-hidden rounded-xl border border-zinc-200 bg-white">
               {items.map((m) => (
                 <li key={m.id}>
-                  <Link href={`/meetings/${m.id}`} className="flex items-center gap-4 px-4 py-3.5 transition hover:bg-zinc-50">
+                  <Link href={`/meetings/${m.id}`} className="group flex items-center gap-4 px-4 py-3.5 transition hover:bg-zinc-50">
                     <div className="w-14 shrink-0 text-xs tabular-nums text-zinc-500">
                       <LocalTime date={m.startedAt} options={TIME} />
                     </div>
@@ -90,6 +91,7 @@ export default async function MeetingsPage() {
                       </div>
                     </div>
                     <SpeakerAvatars speakers={m.speakers} />
+                    {m.source !== "seed" && <DeleteMeetingButton meeting={m} />}
                   </Link>
                 </li>
               ))}

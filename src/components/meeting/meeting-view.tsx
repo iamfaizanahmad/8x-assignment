@@ -1,7 +1,8 @@
 "use client";
 
 import clsx from "clsx";
-import { ArrowLeft, Calendar, Clock, Loader2, RotateCw, Share2, Sparkles, Star, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Loader2, RotateCw, Share2, Sparkles, Star, Trash2, TriangleAlert } from "lucide-react";
+import { DeleteMeetingDialog } from "@/components/delete-meeting";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -102,6 +103,7 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
   const [notesVersion, setNotesVersion] = useState(0);
   const [highlights, setHighlights] = useState<Highlight[]>(data.highlights);
   const [share, setShare] = useState<ShareTarget | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => setSpeakers(data.speakers), [data.speakers]);
@@ -226,8 +228,19 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
             {speakers.length > 0 && <span>{speakers.length} speakers</span>}
           </div>
         </div>
-        {ready && (
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
+          {meeting.source !== "seed" && (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              title="Delete meeting"
+              aria-label="Delete meeting"
+              className="rounded-lg border border-zinc-200 bg-white p-2 text-zinc-500 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+            >
+              <Trash2 className="size-4" />
+            </button>
+          )}
+          {ready && (
+            <>
             <button
               onClick={highlightNow}
               title="Highlight the last 15 seconds (H)"
@@ -242,8 +255,9 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
             >
               <Share2 className="size-4" /> Share
             </button>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(380px,520px)]">
@@ -345,6 +359,7 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
         )}
       </div>
 
+      {confirmDelete && <DeleteMeetingDialog meeting={meeting} afterDelete="home" onClose={() => setConfirmDelete(false)} />}
       {share && <ShareDialog meetingId={meeting.id} target={share} onClose={() => setShare(null)} />}
       {toast && (
         <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-zinc-900 px-4 py-2 text-sm text-white shadow-lg">
