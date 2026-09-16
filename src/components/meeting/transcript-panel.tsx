@@ -2,7 +2,7 @@
 
 import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
-import { Check, ChevronDown, Scissors, Search, Star, UserPlus, X } from "lucide-react";
+import { Check, ChevronDown, Scissors, Search, Share2, Star, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SpeakerAvatar, speakerIndex } from "@/components/speaker-avatars";
 import { formatMs } from "@/lib/time";
@@ -35,6 +35,7 @@ export function TranscriptPanel({
   onHighlight,
   onReassign,
   onSplit,
+  onRange,
   bounds,
 }: {
   segments: Segment[];
@@ -45,12 +46,15 @@ export function TranscriptPanel({
   /** Fix diarization: move a line to another speaker, or to a new one. */
   onReassign?: (seg: Segment, target: number | "new") => Promise<void>;
   onSplit?: (seg: Segment) => Promise<void>;
+  /** Selecting transcript text offers to highlight or share exactly that stretch of the call. */
+  onRange?: (startMs: number, endMs: number, action: "highlight" | "share") => void;
   bounds?: { startMs: number; endMs: number };
 }) {
   const [speakerFilter, setSpeakerFilter] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [follow, setFollow] = useState(true);
   const [menuFor, setMenuFor] = useState<number | null>(null);
+  const [selection, setSelection] = useState<{ startMs: number; endMs: number; top: number; left: number } | null>(null);
   const [saving, setSaving] = useState<number | null>(null);
 
   useEffect(() => {
@@ -94,6 +98,32 @@ export function TranscriptPanel({
     estimateSize: () => 88,
     overscan: 8,
   });
+
+  // Map a text selection onto the transcript lines it touches (rows carry data-seg-id).
+  useEffect(() => {
+    if (!onRange) return;
+    const update = () => {
+      const sel = window.getSelection();
+      const root = scrollRef.current;
+      if (!sel || sel.isCollapsed || !sel.toString().trim() || !root) return setSelection(null);
+      const rowOf = (n: Node | null) => (n instanceof Element ? n : n?.parentElement)?.closest<HTMLElement>("[data-seg-id]");
+      const a = rowOf(sel.anchorNode);
+      const b = rowOf(sel.focusNode);
+      if (!a || !b || !root.contains(a) || !root.contains(b)) return setSelection(null);
+      const ids = new Set([Number(a.dataset.segId), Number(b.dataset.segId)]);
+      const touched = segments.filter((s) => ids.has(s.id));
+      if (touched.length === 0) return setSelection(null);
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      setSelection({
+        startMs: Math.min(...touched.map((s) => s.startMs)),
+        endMs: Math.max(...touched.map((s) => s.endMs)),
+        top: rect.top,
+        left: rect.left + rect.width / 2,
+      });
+    };
+    document.addEventListener("selectionchange", update);
+    return () => document.removeEventListener("selectionchange", update);
+  }, [onRange, segments]);
 
   // Follow the playhead unless the user scrolled in the last 4 seconds.
   useEffect(() => {
@@ -154,7 +184,10 @@ export function TranscriptPanel({
 
       <div
         ref={scrollRef}
-        onWheel={() => (userScrollAt.current = Date.now())}
+        onWheel={() => {
+          userScrollAt.current = Date.now();
+          setSelection(null);
+        }}
         onTouchMove={() => (userScrollAt.current = Date.now())}
         className="scroll-thin min-h-0 flex-1 overflow-y-auto"
       >
@@ -175,7 +208,12 @@ export function TranscriptPanel({
                   style={{ transform: `translateY(${row.start}px)` }}
                 >
                   <div
-                    onClick={() => onSeek(seg.startMs)}
+                    data-seg-id={seg.id}
+                    onClick={() => {
+                      // Finishing a text selection also fires click; don't jump the player then.
+                      if (window.getSelection()?.toString().trim()) return;
+                      onSeek(seg.startMs);
+                    }}
                     className={clsx(
                       "group flex cursor-pointer gap-3 border-l-2 px-4 py-2.5 transition",
                       active ? "border-brand-500 bg-brand-50/70" : "border-transparent hover:bg-zinc-50",
@@ -255,10 +293,14 @@ export function TranscriptPanel({
                               e.stopPropagation();
                               onHighlight(seg);
                             }}
-                            title="Highlight this moment"
-                            className="ml-auto rounded p-0.5 text-zinc-400 opacity-0 transition hover:bg-amber-100 hover:text-amber-600 group-hover:opacity-100"
+                            title="Save this line as a highlight"
+                            className={clsx(
+                              "ml-auto inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 transition hover:bg-amber-100",
+                              // Visible on hover, on the line that's playing, and always on touch screens.
+                              active ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100",
+                            )}
                           >
-                            <Star className="size-3.5" />
+                            <Star className="size-3" /> Highlight
                           </button>
                         )}
                       </div>
@@ -273,6 +315,37 @@ export function TranscriptPanel({
           </div>
         )}
       </div>
+      {onRange && selection && (
+        <div
+          className="fixed z-40 flex -translate-x-1/2 -translate-y-full items-center gap-1 rounded-lg bg-zinc-900 p-1 text-xs text-white shadow-lg"
+          style={{ top: selection.top - 8, left: selection.left }}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <span className="px-2 tabular-nums text-zinc-400">
+            {formatMs(selection.startMs)}–{formatMs(selection.endMs)}
+          </span>
+          <button
+            onClick={() => {
+              onRange(selection.startMs, selection.endMs, "highlight");
+              window.getSelection()?.removeAllRanges();
+              setSelection(null);
+            }}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-white/15"
+          >
+            <Star className="size-3.5 text-amber-400" /> Highlight
+          </button>
+          <button
+            onClick={() => {
+              onRange(selection.startMs, selection.endMs, "share");
+              window.getSelection()?.removeAllRanges();
+              setSelection(null);
+            }}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 hover:bg-white/15"
+          >
+            <Share2 className="size-3.5" /> Share clip
+          </button>
+        </div>
+      )}
     </div>
   );
 }

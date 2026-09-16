@@ -377,6 +377,11 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
                   currentMs={player.currentMs}
                   onSeek={(ms) => player.seek(ms)}
                   onHighlight={(seg: Segment) => addHighlight(seg.startMs, seg.endMs)}
+                  onRange={(startMs, endMs, action) => {
+                    if (endMs - startMs > 10 * 60_000) return flash("Clips can be up to 10 minutes — select less text");
+                    if (action === "highlight") addHighlight(startMs, endMs);
+                    else setShare({ kind: "clip", startMs, endMs });
+                  }}
                   onReassign={isSample ? undefined : reassign}
                   onSplit={isSample ? undefined : split}
                 />
