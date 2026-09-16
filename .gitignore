@@ -4,3 +4,5 @@ node_modules/
 # Hook bookkeeping only (per-session counters). The logs themselves in
 # .agent-logs/ are COMMITTED and ship with the repo.
 .claude/hooks/state/
+__pycache__/
+*.pyc
