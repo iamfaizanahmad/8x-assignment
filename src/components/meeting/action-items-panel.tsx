@@ -5,7 +5,15 @@ import { useState } from "react";
 import type { ActionItem } from "./types";
 import { TimestampChip } from "./timestamp-chip";
 
-export function ActionItemsPanel({ items: initial, onSeek }: { items: ActionItem[]; onSeek: (ms: number) => void }) {
+export function ActionItemsPanel({
+  items: initial,
+  onSeek,
+  readOnly = false,
+}: {
+  items: ActionItem[];
+  onSeek: (ms: number) => void;
+  readOnly?: boolean;
+}) {
   const [items, setItems] = useState(initial);
   if (items.length === 0) return <p className="p-6 text-center text-sm text-zinc-500">No action items were detected in this meeting.</p>;
 
@@ -40,8 +48,9 @@ export function ActionItemsPanel({ items: initial, onSeek }: { items: ActionItem
                 <input
                   type="checkbox"
                   checked={it.done}
+                  disabled={readOnly}
                   onChange={() => toggle(it)}
-                  className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-600"
+                  className="mt-0.5 size-4 shrink-0 cursor-pointer accent-brand-600 disabled:cursor-default"
                 />
                 <span className={clsx("flex-1 text-sm leading-relaxed", it.done ? "text-zinc-400 line-through" : "text-zinc-800")}>
                   {it.text}

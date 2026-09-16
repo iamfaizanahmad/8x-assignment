@@ -9,6 +9,9 @@ import type { SummaryContent, TemplateId } from "@/db/schema";
 import type { MeetingDetail } from "@/lib/queries";
 import { formatMs } from "@/lib/time";
 import { formatDuration } from "@/lib/ui";
+import { LocalTime } from "@/components/local-time";
+
+const DATE_TIME: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
 import { ActionItemsPanel } from "./action-items-panel";
 import { HighlightsPanel } from "./highlights-panel";
 import { MediaPlayer } from "./media-player";
@@ -174,7 +177,7 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
           <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-500">
             <span className="inline-flex items-center gap-1">
               <Calendar className="size-3.5" />
-              {meeting.startedAt.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
+              <LocalTime date={meeting.startedAt} options={DATE_TIME} />
             </span>
             {meeting.durationS > 0 && (
               <span className="inline-flex items-center gap-1">

@@ -4,8 +4,11 @@ import { SpeakerAvatars } from "@/components/speaker-avatars";
 import { UploadButton } from "@/components/upload-dialog";
 import { listMeetings, type MeetingListItem } from "@/lib/queries";
 import { formatDuration } from "@/lib/ui";
+import { LocalTime } from "@/components/local-time";
 
 export const dynamic = "force-dynamic";
+
+const TIME: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
 
 function dayLabel(d: Date) {
   const today = new Date();
@@ -65,7 +68,7 @@ export default async function MeetingsPage() {
                 <li key={m.id}>
                   <Link href={`/meetings/${m.id}`} className="flex items-center gap-4 px-4 py-3.5 transition hover:bg-zinc-50">
                     <div className="w-14 shrink-0 text-xs tabular-nums text-zinc-500">
-                      {m.startedAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                      <LocalTime date={m.startedAt} options={TIME} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
