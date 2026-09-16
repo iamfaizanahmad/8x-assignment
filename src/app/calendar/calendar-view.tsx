@@ -232,8 +232,9 @@ export function CalendarView(props: Props) {
               </>
             ) : (
               <>
-                <span className="font-medium text-zinc-800">Showing a sample schedule.</span> Connect Google Calendar to see your real meetings.
-                Access is read-only and tied to this browser only.
+                <span className="font-medium text-zinc-800">Showing a sample schedule.</span> Connect your own Google Calendar to see your real
+                meetings. Access is read-only and tied to this browser, so nobody else can see your events. Google will say the app isn&apos;t
+                verified yet (it&apos;s a demo); choose <span className="font-medium text-zinc-800">Advanced → Go to Minutes</span> to continue.
               </>
             )}
           </p>
