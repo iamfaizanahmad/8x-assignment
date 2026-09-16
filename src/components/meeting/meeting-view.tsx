@@ -324,7 +324,7 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
                 segments={segments}
                 onSeek={(ms) => player.seek(ms)}
               />
-              <SpeakersPanel speakers={speakers} onRename={rename} readOnly={isSample} />
+              <SpeakersPanel speakers={speakers} onRename={rename} readOnly={isSample} meetingId={meeting.id} onSeek={(ms) => player.seek(ms)} />
               {isSample && (
                 <p className="px-1 text-xs text-zinc-500">
                   Sample meeting: speaker edits are disabled on the public demo so every visitor sees the same data. Highlights and sharing

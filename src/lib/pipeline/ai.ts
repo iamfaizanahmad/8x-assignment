@@ -54,11 +54,11 @@ function toSummary(raw: RawSummary): SummaryContent {
   };
 }
 
-async function callTool<T>(name: string, description: string, schema: object, prompt: string): Promise<T> {
+async function callTool<T>(name: string, description: string, schema: object, prompt: string, system = SYSTEM): Promise<T> {
   const res = await client.messages.create({
     model: model(),
     max_tokens: 16000,
-    system: SYSTEM,
+    system,
     tools: [{ name, description, input_schema: schema as Anthropic.Tool.InputSchema }],
     tool_choice: { type: "tool", name },
     messages: [{ role: "user", content: prompt }],
@@ -145,4 +145,74 @@ export async function summarizeWithTemplate(transcript: string, template: Templa
     `${attendeeHint(attendees)}<transcript>\n${transcript}\n</transcript>\n\nWrite a "${t.name}" summary. ${t.instructions}`,
   );
   return toSummary(raw);
+}
+
+export type SpeakerNameSuggestion = {
+  label: string;
+  name: string;
+  confidence: "high" | "medium";
+  evidence: string;
+  timestampMs?: number;
+};
+
+const SPEAKER_ID_SYSTEM = `You identify who is who in a diarized meeting transcript, where speakers are labelled "Speaker N".
+Name a speaker only with direct evidence in the transcript:
+- they introduce themselves ("I'm Priya from finance", "my name is…");
+- someone addresses a person by name and that speaker is the one who replies next ("Over to you, Councillor Codd." then Speaker 4 answers);
+- a chair or host calls on someone by name and that speaker immediately responds;
+- invitee names can confirm a name heard in the transcript, but are never evidence on their own.
+Titles and roles are fine as part of the name when that's how people are addressed ("Councillor Codd", "Dr Patel"). Spell names as they appear in the transcript.
+Diarization is imperfect: short replies can be misattributed, so prefer evidence where the named person then speaks at length.
+Confidence:
+- "high": the speaker introduces themselves by name, OR they are addressed by name and reply in the very next line.
+- "medium": anything less direct (named earlier in a list, a reply that isn't the next line, a name inferred from a role).
+Each piece of evidence must support one speaker only; never reuse the same quote for two speakers.
+Evidence is a verbatim quote without timestamps; put the key line's timestamp in the timestamp field.
+Skip any speaker you can't name with evidence. Never guess from topic, tone or talk time.`;
+
+/** Proposes real names for "Speaker N" labels, each backed by a quote. Nothing is applied until a person accepts it. */
+export async function suggestSpeakerNames(transcriptByLabel: string, labels: string[], attendees: string[] = []) {
+  const raw = await callTool<{
+    speakers: { label: string; name: string; confidence: string; evidence: string; timestamp?: string }[];
+  }>(
+    "record_speaker_names",
+    "Record the speakers you can identify by name, with evidence.",
+    {
+      type: "object",
+      properties: {
+        speakers: {
+          type: "array",
+          description: "Only speakers identified with evidence. Omit the rest.",
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string", enum: labels },
+              name: { type: "string", description: "How the person is named in the meeting, e.g. 'Councillor Codd' or 'Priya Shah'" },
+              confidence: { type: "string", enum: ["high", "medium"] },
+              evidence: { type: "string", description: "Short quote(s) from the transcript that establish the name, max 200 characters" },
+              timestamp: { type: "string", description: "Timestamp of the key evidence line, copied from the transcript" },
+            },
+            required: ["label", "name", "confidence", "evidence"],
+          },
+        },
+      },
+      required: ["speakers"],
+    },
+    `${attendeeHint(attendees)}<transcript>\n${transcriptByLabel}\n</transcript>`,
+    SPEAKER_ID_SYSTEM,
+  );
+  const seen = new Set<string>();
+  return (raw.speakers ?? [])
+    .filter((s) => labels.includes(s.label) && s.name?.trim() && !seen.has(s.label) && seen.add(s.label))
+    .map<SpeakerNameSuggestion>((s) => {
+      // Models sometimes inline "[12:34]" in the quote instead of using the field; recover it and tidy the quote.
+      const inline = s.evidence.match(/\[(\d{1,2}:\d{2}(?::\d{2})?)\]/)?.[1];
+      return {
+        label: s.label,
+        name: s.name.trim(),
+        confidence: s.confidence === "high" ? "high" : "medium",
+        evidence: s.evidence.replace(/\s*\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "").trim().slice(0, 240),
+        timestampMs: parseTimestamp(s.timestamp) ?? parseTimestamp(inline),
+      };
+    });
 }
