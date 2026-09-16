@@ -34,7 +34,16 @@ export function UploadButton({ enabled }: { enabled: boolean }) {
   );
 }
 
-function UploadDialog({ enabled, onClose }: { enabled: boolean; onClose: () => void }) {
+export function UploadDialog({
+  enabled,
+  onClose,
+  event,
+}: {
+  enabled: boolean;
+  onClose: () => void;
+  /** When set, the meeting is filed against this calendar event (title, time, attendees come from Google). */
+  event?: { id: string; title: string };
+}) {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
@@ -47,7 +56,7 @@ function UploadDialog({ enabled, onClose }: { enabled: boolean; onClose: () => v
       const res = await fetch("/api/uploads", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ filename: file.name, contentType: file.type, size: file.size }),
+        body: JSON.stringify({ filename: file.name, contentType: file.type, size: file.size, calendarEventId: event?.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Could not start upload");
@@ -64,9 +73,15 @@ function UploadDialog({ enabled, onClose }: { enabled: boolean; onClose: () => v
       <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-start justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Upload a recording</h2>
+            <h2 className="text-lg font-semibold">{event ? "Attach recording" : "Upload a recording"}</h2>
             <p className="mt-1 text-sm text-zinc-500">
-              Stands in for the meeting bot: drop a Zoom, Meet or Teams recording and get the transcript, summary and action items.
+              {event ? (
+                <>
+                  Notes will be filed under <span className="font-medium text-zinc-800">{event.title}</span>.
+                </>
+              ) : (
+                "Stands in for the meeting bot: drop a Zoom, Meet or Teams recording and get the transcript, summary and action items."
+              )}
             </p>
           </div>
           <button onClick={onClose} className="rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700">

@@ -68,6 +68,11 @@ async function callTool<T>(name: string, description: string, schema: object, pr
   return block.input as T;
 }
 
+/** Calendar invitees help the model put names to "Speaker N" when the conversation makes it clear who is who. */
+function attendeeHint(attendees: string[]) {
+  return attendees.length ? `Calendar invitees (may not all have spoken): ${attendees.join(", ")}\n\n` : "";
+}
+
 export type MeetingAnalysis = {
   title: string;
   chapters: Chapter[];
@@ -76,7 +81,7 @@ export type MeetingAnalysis = {
 };
 
 /** One call per meeting: title + chapters + General summary + action items. */
-export async function analyzeMeeting(transcript: string): Promise<MeetingAnalysis> {
+export async function analyzeMeeting(transcript: string, attendees: string[] = []): Promise<MeetingAnalysis> {
   const raw = await callTool<{
     title: string;
     chapters: { title: string; timestamp: string }[];
@@ -115,7 +120,7 @@ export async function analyzeMeeting(transcript: string): Promise<MeetingAnalysi
       },
       required: ["title", "chapters", "summary", "action_items"],
     },
-    `<transcript>\n${transcript}\n</transcript>`,
+    `${attendeeHint(attendees)}<transcript>\n${transcript}\n</transcript>`,
   );
   return {
     title: raw.title,
@@ -131,13 +136,13 @@ export async function analyzeMeeting(transcript: string): Promise<MeetingAnalysi
   };
 }
 
-export async function summarizeWithTemplate(transcript: string, template: TemplateId): Promise<SummaryContent> {
+export async function summarizeWithTemplate(transcript: string, template: TemplateId, attendees: string[] = []): Promise<SummaryContent> {
   const t = TEMPLATES[template];
   const raw = await callTool<RawSummary>(
     "record_summary",
     `Record a "${t.name}" meeting summary.`,
     summarySchema,
-    `<transcript>\n${transcript}\n</transcript>\n\nWrite a "${t.name}" summary. ${t.instructions}`,
+    `${attendeeHint(attendees)}<transcript>\n${transcript}\n</transcript>\n\nWrite a "${t.name}" summary. ${t.instructions}`,
   );
   return toSummary(raw);
 }

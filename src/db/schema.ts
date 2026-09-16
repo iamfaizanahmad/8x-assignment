@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  primaryKey,
   customType,
   index,
   integer,
@@ -35,6 +36,8 @@ export const meetings = pgTable("meetings", {
   error: text("error"),
   source: text("source").$type<"upload" | "seed">().notNull().default("upload"),
   chapters: jsonb("chapters").$type<Chapter[]>().notNull().default([]),
+  calendarEventId: text("calendar_event_id"),
+  attendees: jsonb("attendees").$type<string[]>().notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -105,3 +108,30 @@ export const shareLinks = pgTable("share_links", {
   endMs: integer("end_ms"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export type AutoJoinRule = "all" | "hosted" | "none";
+
+/** One Google Calendar per browser session (the demo has no user accounts). Tokens are AES-GCM encrypted. */
+export const calendarConnections = pgTable("calendar_connections", {
+  id: serial("id").primaryKey(),
+  sessionId: text("session_id").notNull().unique(),
+  provider: text("provider").$type<"google">().notNull().default("google"),
+  email: text("email").notNull(),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  autoJoinRule: text("auto_join_rule").$type<AutoJoinRule>().notNull().default("all"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const calendarEventOverrides = pgTable(
+  "calendar_event_overrides",
+  {
+    connectionId: integer("connection_id")
+      .notNull()
+      .references(() => calendarConnections.id, { onDelete: "cascade" }),
+    eventId: text("event_id").notNull(),
+    record: boolean("record").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.connectionId, t.eventId] })],
+);

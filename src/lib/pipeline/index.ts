@@ -73,13 +73,19 @@ export async function processMeeting(id: string) {
     await db.update(meetings).set({ durationS }).where(eq(meetings.id, id));
 
     await setStatus(id, "summarizing");
-    const analysis = await analyzeMeeting(await loadTranscriptText(id));
+    const analysis = await analyzeMeeting(await loadTranscriptText(id), meeting.attendees);
     await db.insert(summaries).values({ meetingId: id, template: "general", content: analysis.summary });
     if (analysis.actionItems.length)
       await db.insert(actionItems).values(analysis.actionItems.map((a) => ({ meetingId: id, ...a })));
     await db
       .update(meetings)
-      .set({ title: analysis.title || meeting.title, chapters: analysis.chapters, status: "ready", error: null })
+      // A calendar event already has the title people know the meeting by.
+      .set({
+        title: meeting.calendarEventId ? meeting.title : analysis.title || meeting.title,
+        chapters: analysis.chapters,
+        status: "ready",
+        error: null,
+      })
       .where(eq(meetings.id, id));
   } catch (err) {
     console.error(`[pipeline] meeting ${id} failed`, err);
@@ -95,7 +101,8 @@ export async function getOrCreateSummary(meetingId: string, template: TemplateId
     .from(summaries)
     .where(and(eq(summaries.meetingId, meetingId), eq(summaries.template, template)));
   if (existing) return existing;
-  const content = await summarizeWithTemplate(await loadTranscriptText(meetingId), template);
+  const [meeting] = await db.select({ attendees: meetings.attendees }).from(meetings).where(eq(meetings.id, meetingId));
+  const content = await summarizeWithTemplate(await loadTranscriptText(meetingId), template, meeting?.attendees ?? []);
   const [row] = await db.insert(summaries).values({ meetingId, template, content }).returning();
   return row;
 }
