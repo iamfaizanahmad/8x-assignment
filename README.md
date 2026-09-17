@@ -3,10 +3,6 @@
 A rebuild of [fathom.video](https://fathom.video) for the 8x assignment: recordings go in, and searchable,
 shareable intelligence comes out.
 
-- **Live app:** https://8x-assignment-iota.vercel.app (public, no sign-in)
-- **Repository:** https://github.com/iamfaizanahmad/8x-assignment (agent transcripts are in [`.agent-logs/`](.agent-logs))
-- **Walkthrough:** _link in the submission form_
-
 > **The one thing to know:** the recording bot is simulated. Everything after capture is real and runs on real audio:
 > transcription, speakers, summaries, templates, action items, highlights, search, Ask AI, sharing and Google
 > Calendar sync. You get a meeting in by uploading its recording (or attaching it to a calendar event).
