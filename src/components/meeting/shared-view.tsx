@@ -123,7 +123,7 @@ export function SharedView({ data, clip }: { data: MeetingDetail; clip?: { start
               {tab === "transcript" && (
                 <TranscriptPanel segments={data.segments} speakers={data.speakers} currentMs={player.currentMs} onSeek={seek} bounds={clip} />
               )}
-              {tab === "actions" && <ActionItemsPanel items={data.actionItems} onSeek={seek} readOnly />}
+              {tab === "actions" && <ActionItemsPanel items={data.actionItems} speakers={data.speakers} onSeek={seek} readOnly />}
             </div>
           </div>
         </div>

@@ -4,6 +4,7 @@ import {
   primaryKey,
   uniqueIndex,
   customType,
+  date,
   index,
   integer,
   jsonb,
@@ -90,10 +91,18 @@ export const actionItems = pgTable("action_items", {
   id: serial("id").primaryKey(),
   meetingId: text("meeting_id").notNull().references(() => meetings.id, { onDelete: "cascade" }),
   text: text("text").notNull(),
+  /** Name as the model wrote it at extraction time. Display uses ownerSpeakerId so renames apply. */
   owner: text("owner"),
+  ownerSpeakerId: integer("owner_speaker_id").references(() => speakers.id, { onDelete: "set null" }),
+  /** The transcript line where the commitment was made. */
+  segmentId: integer("segment_id").references(() => transcriptSegments.id, { onDelete: "set null" }),
   timestampMs: integer("timestamp_ms"),
+  dueDate: date("due_date"),
+  /** Verbatim wording the due date was resolved from, e.g. "before Friday". */
+  duePhrase: text("due_phrase"),
   done: boolean("done").notNull().default(false),
-});
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+}, (t) => [index("action_items_done_idx").on(t.done)]);
 
 export const highlights = pgTable("highlights", {
   id: serial("id").primaryKey(),

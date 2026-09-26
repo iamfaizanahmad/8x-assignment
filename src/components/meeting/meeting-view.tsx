@@ -135,7 +135,7 @@ function Processing({
 export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialMs?: number }) {
   const { meeting } = data;
   const player = usePlayer({ initialMs });
-  const [tab, setTab] = useState<Tab>(initialMs ? "transcript" : "summary");
+  const [tab, setTab] = useState<Tab>(initialMs != null ? "transcript" : "summary");
   const router = useRouter();
   const [speakers, setSpeakers] = useState<Speaker[]>(data.speakers);
   const [segments, setSegments] = useState<Segment[]>(data.segments);
@@ -260,7 +260,7 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
   return (
     <main className="mx-auto max-w-[1400px] px-4 py-5 sm:px-6">
       <div className="mb-5 flex flex-wrap items-start gap-3">
-        <Link href="/" className="mt-1 rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700" title="All meetings">
+        <Link href="/meetings" className="mt-1 rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700" title="All meetings">
           <ArrowLeft className="size-5" />
         </Link>
         <div className="min-w-0 flex-1">
@@ -399,7 +399,7 @@ export function MeetingView({ data, initialMs }: { data: MeetingDetail; initialM
                   onSplit={isSample ? undefined : split}
                 />
               )}
-              {tab === "actions" && <ActionItemsPanel items={data.actionItems} onSeek={(ms) => player.seek(ms)} />}
+              {tab === "actions" && <ActionItemsPanel items={data.actionItems} speakers={speakers} onSeek={(ms) => player.seek(ms)} />}
               {tab === "highlights" && (
                 <HighlightsPanel
                   highlights={highlights}

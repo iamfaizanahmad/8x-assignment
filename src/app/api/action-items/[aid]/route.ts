@@ -7,6 +7,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ aid: s
   const { aid } = await params;
   const parsed = z.object({ done: z.boolean() }).safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid body" }, { status: 400 });
-  const [row] = await db.update(actionItems).set(parsed.data).where(eq(actionItems.id, Number(aid))).returning();
+  const [row] = await db
+    .update(actionItems)
+    .set({ done: parsed.data.done, completedAt: parsed.data.done ? new Date() : null })
+    .where(eq(actionItems.id, Number(aid))).returning();
   return row ? NextResponse.json(row) : NextResponse.json({ error: "Not found" }, { status: 404 });
 }

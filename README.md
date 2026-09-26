@@ -36,6 +36,16 @@ shareable intelligence comes out.
 - **`npm run import -- <file>`** imports large recordings from the terminal: multipart upload, the full pipeline, and
   every template generated ahead of time.
 
+### Open items (the landing page)
+- **Every action item across all meetings**, with Pending and Done tabs. Done is most recently completed first, so
+  nothing disappears.
+- **Grouped by owner**, using the speaker's current name, so renaming a speaker regroups the page. Items with no clear
+  owner go under Unassigned rather than a guess.
+- **Each item links to the transcript line it came from.** Expand it to read the quote, or use the timestamp to open
+  the meeting at that moment.
+- **Due dates only when they're reliable:** the meeting is calendar-attached, so its date is known, or the deadline
+  states the year. Otherwise there's no due date.
+
 ### The meeting page
 - **Player synced to the transcript:** the active line follows playback, and clicking any line, summary bullet,
   action item or chapter seeks there. Keyboard: `Space`, `←`/`→`, `H`.
@@ -148,6 +158,7 @@ Viewers ─▶ server-rendered pages sign short-lived media URLs; everything els
 npm install
 cp .env.example .env.local     # fill in the values below
 npm run db:push                # create tables in Neon
+npm run db:migrate             # existing databases: add open-items columns and backfill (idempotent)
 npm run dev
 ```
 

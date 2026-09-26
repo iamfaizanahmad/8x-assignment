@@ -27,7 +27,7 @@ export function DeleteMeetingDialog({
       return;
     }
     onClose();
-    if (afterDelete === "home") router.push("/");
+    if (afterDelete === "home") router.push("/meetings");
     router.refresh();
   }
 

@@ -20,5 +20,5 @@ export default async function MeetingPage({
   const [{ id }, { t }] = await Promise.all([params, searchParams]);
   const data = await getMeeting(id);
   if (!data) notFound();
-  return <MeetingView data={data} initialMs={t ? Number(t) || undefined : undefined} />;
+  return <MeetingView data={data} initialMs={t && Number.isFinite(Number(t)) ? Number(t) : undefined} />;
 }

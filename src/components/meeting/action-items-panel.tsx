@@ -2,24 +2,30 @@
 
 import clsx from "clsx";
 import { useState } from "react";
-import type { ActionItem } from "./types";
+import { speakerName } from "@/lib/ui";
+import type { ActionItem, Speaker } from "./types";
 import { TimestampChip } from "./timestamp-chip";
 
 export function ActionItemsPanel({
   items: initial,
+  speakers,
   onSeek,
   readOnly = false,
 }: {
   items: ActionItem[];
+  speakers: Speaker[];
   onSeek: (ms: number) => void;
   readOnly?: boolean;
 }) {
   const [items, setItems] = useState(initial);
   if (items.length === 0) return <p className="p-6 text-center text-sm text-zinc-500">No action items were detected in this meeting.</p>;
 
-  // Group by owner so an 8-person call reads as "who owes what".
+  // Group by owner so an 8-person call reads as "who owes what". Uses the live speaker record, so renames apply.
+  const byId = new Map(speakers.map((s) => [s.id, speakerName(s)]));
+  const ownerOf = (it: ActionItem) => (it.ownerSpeakerId != null && byId.get(it.ownerSpeakerId)) || "Unassigned";
   const groups = new Map<string, ActionItem[]>();
-  for (const it of items) groups.set(it.owner || "Unassigned", [...(groups.get(it.owner || "Unassigned") ?? []), it]);
+  for (const it of items) groups.set(ownerOf(it), [...(groups.get(ownerOf(it)) ?? []), it]);
+  const ordered = [...groups].sort(([a, x], [b, y]) => Number(a === "Unassigned") - Number(b === "Unassigned") || y.length - x.length);
   const done = items.filter((i) => i.done).length;
 
   async function toggle(item: ActionItem) {
@@ -37,7 +43,7 @@ export function ActionItemsPanel({
       <p className="text-xs text-zinc-500">
         {done} of {items.length} done · grouped by owner
       </p>
-      {[...groups].map(([owner, list]) => (
+      {ordered.map(([owner, list]) => (
         <section key={owner}>
           <h3 className="mb-2 text-sm font-semibold">
             {owner} <span className="font-normal text-zinc-400">· {list.length}</span>

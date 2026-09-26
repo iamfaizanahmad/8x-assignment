@@ -28,3 +28,8 @@ export function formatDuration(s: number) {
   const m = Math.round((s % 3600) / 60);
   return h ? `${h}h ${m}m` : `${m} min`;
 }
+
+/** plural(1, "item") -> "1 item", plural(2, "person", "people") -> "2 people" */
+export function plural(n: number, one: string, many = `${one}s`) {
+  return `${n} ${n === 1 ? one : many}`;
+}

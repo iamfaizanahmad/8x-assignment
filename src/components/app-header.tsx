@@ -7,7 +7,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
 const NAV = [
-  { href: "/", label: "Meetings" },
+  { href: "/open-items", label: "Open items" },
+  { href: "/meetings", label: "Meetings" },
   { href: "/calendar", label: "Calendar" },
 ];
 
@@ -28,7 +29,7 @@ export function AppHeader() {
         </Link>
         <nav className="flex items-center gap-1 text-sm">
           {NAV.map((n) => {
-            const active = n.href === "/" ? pathname === "/" || pathname.startsWith("/meetings") : pathname.startsWith(n.href);
+            const active = pathname.startsWith(n.href);
             return (
               <Link
                 key={n.href}

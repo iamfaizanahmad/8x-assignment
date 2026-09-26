@@ -77,16 +77,62 @@ export type MeetingAnalysis = {
   title: string;
   chapters: Chapter[];
   summary: SummaryContent;
-  actionItems: { text: string; owner?: string; timestampMs?: number }[];
+  actionItems: ExtractedActionItem[];
 };
 
+export type ExtractedActionItem = {
+  text: string;
+  /** A roster label ("Speaker 2"), or undefined when nobody on the call clearly owns it. */
+  ownerLabel?: string;
+  timestampMs?: number;
+  dueDate?: string;
+  duePhrase?: string;
+};
+
+export type AnalysisContext = {
+  attendees?: string[];
+  /** Everyone diarized in the recording, with their current names if known. */
+  speakers: { label: string; name: string | null }[];
+  /** Only when the meeting's date is known (calendar-attached); otherwise relative deadlines can't be resolved. */
+  meetingDate?: Date;
+};
+
+const DAY_MS = 86_400_000;
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+
+/**
+ * Keep a due date only when it can be trusted: a relative phrase needs a known meeting date to anchor it,
+ * and the date must land on/after the meeting and within a year. Otherwise there's no chip rather than a wrong one.
+ */
+export function checkDueDate(dueDate: string | undefined, phrase: string | undefined, meetingDate: Date | undefined) {
+  if (!dueDate || !phrase?.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return {};
+  const due = new Date(`${dueDate}T00:00:00Z`);
+  if (Number.isNaN(due.getTime()) || isoDay(due) !== dueDate) return {};
+  if (meetingDate) {
+    const start = new Date(`${isoDay(meetingDate)}T00:00:00Z`).getTime();
+    if (due.getTime() < start || due.getTime() > start + 366 * DAY_MS) return {};
+  } else if (!/\b(19|20)\d{2}\b/.test(phrase)) {
+    return {};
+  }
+  return { dueDate, duePhrase: phrase.trim().slice(0, 120) };
+}
+
+function rosterHint(ctx: AnalysisContext) {
+  const roster = ctx.speakers.map((s) => (s.name && s.name !== s.label ? `${s.label} (${s.name})` : s.label)).join(", ");
+  const date = ctx.meetingDate
+    ? `Meeting date: ${ctx.meetingDate.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" })} ${isoDay(ctx.meetingDate)}`
+    : "Meeting date: unknown";
+  return `Speakers in this recording: ${roster}\n${date}\n\n`;
+}
+
 /** One call per meeting: title + chapters + General summary + action items. */
-export async function analyzeMeeting(transcript: string, attendees: string[] = []): Promise<MeetingAnalysis> {
+export async function analyzeMeeting(transcript: string, ctx: AnalysisContext): Promise<MeetingAnalysis> {
+  const labels = ctx.speakers.map((s) => s.label);
   const raw = await callTool<{
     title: string;
     chapters: { title: string; timestamp: string }[];
     summary: RawSummary;
-    action_items: { text: string; owner?: string; timestamp?: string }[];
+    action_items: { text: string; owner_speaker?: string; timestamp?: string; due_date?: string; due_phrase?: string }[];
   }>(
     "record_meeting_notes",
     "Record the notes for this meeting.",
@@ -111,16 +157,32 @@ export async function analyzeMeeting(transcript: string, attendees: string[] = [
             type: "object",
             properties: {
               text: { type: "string", description: "Imperative, e.g. 'Send pricing deck to Acme'" },
-              owner: { type: "string", description: "Person responsible, if known" },
-              timestamp: { type: "string" },
+              owner_speaker: {
+                type: "string",
+                enum: [...labels, "unassigned"],
+                description:
+                  "The speaker who committed to it or was clearly assigned it, as their label from the speaker list. " +
+                  "'unassigned' if it belongs to a group, an organisation, someone who isn't a speaker, or it's unclear. Never guess.",
+              },
+              timestamp: { type: "string", description: "Timestamp of the line where the commitment is made, copied exactly" },
+              due_phrase: {
+                type: "string",
+                description: "Only if a deadline is stated: the exact words, e.g. 'before Friday', 'by 3 October 2026'. Omit otherwise.",
+              },
+              due_date: {
+                type: "string",
+                description:
+                  "YYYY-MM-DD for due_phrase, resolved against the meeting date. Omit if there is no deadline, " +
+                  "or if the meeting date is unknown and the phrase doesn't state the year.",
+              },
             },
-            required: ["text", "timestamp"],
+            required: ["text", "owner_speaker", "timestamp"],
           },
         },
       },
       required: ["title", "chapters", "summary", "action_items"],
     },
-    `${attendeeHint(attendees)}<transcript>\n${transcript}\n</transcript>`,
+    `${rosterHint(ctx)}${attendeeHint(ctx.attendees ?? [])}<transcript>\n${transcript}\n</transcript>`,
   );
   return {
     title: raw.title,
@@ -128,11 +190,14 @@ export async function analyzeMeeting(transcript: string, attendees: string[] = [
       .map((c) => ({ title: c.title, startMs: parseTimestamp(c.timestamp) ?? 0 }))
       .sort((a, b) => a.startMs - b.startMs),
     summary: toSummary(raw.summary),
-    actionItems: (raw.action_items ?? []).map((a) => ({
-      text: a.text,
-      owner: a.owner || undefined,
-      timestampMs: parseTimestamp(a.timestamp),
-    })),
+    actionItems: (raw.action_items ?? [])
+      .filter((a) => a.text?.trim())
+      .map((a) => ({
+        text: a.text.trim(),
+        ownerLabel: a.owner_speaker && labels.includes(a.owner_speaker) ? a.owner_speaker : undefined,
+        timestampMs: parseTimestamp(a.timestamp),
+        ...checkDueDate(a.due_date, a.due_phrase, ctx.meetingDate),
+      })),
   };
 }
 
