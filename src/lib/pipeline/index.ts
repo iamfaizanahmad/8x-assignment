@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, eq } from "drizzle-orm";
 import { actionItems, db, meetings, speakers, summaries, transcriptSegments, type TemplateId } from "@/db";
 import { MAX_UPLOAD_DURATION_S } from "@/lib/limits";
+import { indexMeetingSafely } from "@/lib/rag";
 import { objectExists, signDownload } from "@/lib/storage";
 import { analyzeMeeting, renderTranscript, summarizeWithTemplate, type AnalysisContext, type ExtractedActionItem } from "./ai";
 import { transcribeUrl } from "./deepgram";
@@ -101,7 +102,7 @@ export async function replaceActionItems(meetingId: string, items: ExtractedActi
   if (rows.length) await db.insert(actionItems).values(rows);
 }
 
-/** Upload -> Deepgram -> one Claude call -> DB. Idempotent: clears previous derived rows first. */
+/** Upload -> Deepgram -> one Claude call -> DB -> retrieval index. Idempotent: clears previous derived rows first. */
 export async function processMeeting(id: string) {
   const [meeting] = await db.select().from(meetings).where(eq(meetings.id, id));
   if (!meeting?.mediaKey) throw new Error("Meeting has no media");
@@ -168,7 +169,11 @@ export async function processMeeting(id: string) {
     await setStatus(id, "failed", err instanceof Error ? err.message : String(err));
     throw err;
   }
+  // After "ready" so the notes aren't held up by embedding rate limits. Bounded to fit the function timeout;
+  // whatever Voyage doesn't embed in time stays keyword-searchable until `npm run index`.
+  await indexMeetingSafely(id, 60_000);
 }
+
 
 export class SummaryUnavailableError extends Error {
   constructor(

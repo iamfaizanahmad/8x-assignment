@@ -12,6 +12,7 @@ import {
   serial,
   text,
   timestamp,
+  vector,
 } from "drizzle-orm/pg-core";
 
 const tsvector = customType<{ data: string }>({
@@ -72,6 +73,30 @@ export const transcriptSegments = pgTable(
   (t) => [
     index("segments_meeting_idx").on(t.meetingId, t.startMs),
     index("segments_tsv_idx").using("gin", t.tsv),
+  ],
+);
+
+/**
+ * Retrieval units for library-wide Ask AI (hybrid RAG): a window of consecutive transcript lines.
+ * `content` is what was embedded and keyword-indexed; prompts re-render the time range from transcript_segments
+ * so speaker renames show up without re-embedding. `embedding` is NULL until Voyage has embedded it.
+ */
+export const transcriptChunks = pgTable(
+  "transcript_chunks",
+  {
+    id: serial("id").primaryKey(),
+    meetingId: text("meeting_id").notNull().references(() => meetings.id, { onDelete: "cascade" }),
+    /** Start of the first line and end of the last line in the window. */
+    startMs: integer("start_ms").notNull(),
+    endMs: integer("end_ms").notNull(),
+    content: text("content").notNull(),
+    embedding: vector("embedding", { dimensions: 1024 }),
+    tsv: tsvector("tsv").generatedAlwaysAs(sql`to_tsvector('english', content)`),
+  },
+  (t) => [
+    index("chunks_meeting_idx").on(t.meetingId, t.startMs),
+    index("chunks_tsv_idx").using("gin", t.tsv),
+    index("chunks_embedding_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
   ],
 );
 

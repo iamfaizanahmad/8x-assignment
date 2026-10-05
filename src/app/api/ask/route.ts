@@ -23,15 +23,20 @@ export async function POST(req: Request) {
   const { question, meetingId, history } = parsed.data;
 
   const scope = meetingId ? "meeting" : "library";
-  const context = meetingId ? await meetingContext(meetingId) : await libraryContext();
-  if (!context)
+  // One meeting fits in context whole; the library is answered from retrieved excerpts (hybrid RAG).
+  const built: { context: string; retrieved?: string; mode: string } | null = meetingId
+    ? await meetingContext(meetingId).then((context) => (context ? { context, mode: "full-transcript" } : null))
+    : await libraryContext(question, history);
+  if (!built)
     return NextResponse.json(
       { error: meetingId ? "This meeting has no transcript to ask about yet." : "There are no processed meetings to ask about yet." },
       { status: 409 },
     );
 
   const visitor = visitorHash(req);
-  const cacheKey = askCacheKey(`${scope}:${meetingId ?? ""}`, context, question, history);
+  const { context, retrieved, mode: retrieval } = built;
+  // Retrieved excerpts are part of the key: the same question over a changed library is a different question.
+  const cacheKey = askCacheKey(`${scope}:${meetingId ?? ""}`, context + (retrieved ?? ""), question, history);
 
   // Same question over unchanged material: replay the stored answer for free.
   const [cached] = await db
@@ -41,7 +46,7 @@ export async function POST(req: Request) {
     .orderBy(desc(askLog.createdAt))
     .limit(1);
   if (cached?.answer)
-    return new Response(cached.answer, { headers: { "content-type": "text/plain; charset=utf-8", "x-answer-cache": "hit" } });
+    return new Response(cached.answer, { headers: { "content-type": "text/plain; charset=utf-8", "x-answer-cache": "hit", "x-retrieval": retrieval } });
 
   const lastHour = gt(askLog.createdAt, sql`now() - interval '1 hour'`);
   const [[{ mine }], [{ total }]] = await Promise.all([
@@ -54,7 +59,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "The demo's hourly question limit is reached. Try again later." }, { status: 429 });
 
   const [log] = await db.insert(askLog).values({ visitorHash: visitor, meetingId, cacheKey, question }).returning({ id: askLog.id });
-  const stream = streamAnswer({ scope, context, question, history });
+  const stream = streamAnswer({ scope, context, retrieved, question, history });
   const encoder = new TextEncoder();
 
   return new Response(
@@ -90,6 +95,6 @@ export async function POST(req: Request) {
         stream.abort();
       },
     }),
-    { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-answer-cache": "miss" } },
+    { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-answer-cache": "miss", "x-retrieval": retrieval } },
   );
 }

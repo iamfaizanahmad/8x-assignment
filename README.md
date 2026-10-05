@@ -70,7 +70,9 @@ shareable intelligence comes out.
 - **Full-text search** (Postgres `tsvector`) with speaker, timestamp and highlighted snippet. Results open the meeting
   at that moment. Supports `"phrases"`, `-exclude` and `or`.
 - **Ask AI across all meetings** ("When did we decide the launch date?"), with citations that link to the exact
-  meeting and moment. Questions typed into search offer "Ask AI instead".
+  meeting and moment. Questions typed into search offer "Ask AI instead". Answered with **hybrid RAG**: transcripts
+  are chunked and embedded (Voyage AI, pgvector), and each question retrieves the best passages by vector *and*
+  keyword search, fused with Reciprocal Rank Fusion. Details under [How it works](#how-it-works).
 
 ### Sharing
 - **Share a meeting or a clip** as a public link that needs no sign-in, for someone who wasn't on the call.
@@ -114,7 +116,8 @@ Browser ── presigned PUT ──▶ S3 (private)
    └─ POST /process ─▶ Vercel function (after())
                           ├─ signed GET URL ─▶ Deepgram Nova-3 (diarized utterances)
                           ├─ segments + speakers ─▶ Neon Postgres (tsvector + GIN index)
-                          └─ one Claude tool call ─▶ title · chapters · summary · action items
+                          ├─ one Claude tool call ─▶ title · chapters · summary · action items
+                          └─ chunks ─▶ Voyage embeddings ─▶ pgvector (HNSW) + tsvector, for library Ask AI
 Viewers ─▶ server-rendered pages sign short-lived media URLs; everything else is read from Postgres
 ```
 
@@ -126,6 +129,21 @@ Viewers ─▶ server-rendered pages sign short-lived media URLs; everything els
 | Media | AWS S3, private bucket, presigned URLs | Direct browser uploads of large files; nothing publicly listable |
 | Transcription | Deepgram Nova-3 | Diarization and utterance timestamps in one call, fast on hour-long audio |
 | AI | Claude Haiku 4.5 (configurable via `LLM_MODEL`) | Structured tool output for notes and templates, streaming for Ask AI, low cost |
+| Embeddings | Voyage AI `voyage-3.5-lite` (1024-dim) in Neon **pgvector** | Anthropic's recommended embeddings partner; vectors live next to the data, so no separate vector DB |
+
+**Ask AI retrieval.** A single meeting fits in the context window, so per-meeting Ask AI sends the whole transcript
+(cached). Across meetings that stops scaling, so library Ask AI is retrieval-augmented:
+- **Chunking:** windows of whole transcript lines (~1,000 chars) overlapping by one line, each prefixed with its
+  meeting title and date before embedding (a contextual chunk header).
+- **Hybrid retrieval:** pgvector cosine search finds passages by meaning; Postgres full-text search (any-word match,
+  `ts_rank_cd`) catches exact names, numbers and jargon that embeddings blur. The two rankings are merged with
+  **Reciprocal Rank Fusion**, and the top 12 chunks go to Claude.
+- **Context:** a catalog of every meeting (title, date, speakers, overview) in the cached prompt block, then the
+  retrieved excerpts. Overlapping chunks merge, and lines are re-read from the transcript so speaker renames apply.
+- **Follow-ups** are retrieved together with the previous question, so "what about her deadline?" still finds things.
+- **Degrades instead of failing:** if Voyage is down or rate-limited, retrieval falls back to keyword-only. Chunks
+  that couldn't be embedded are stored without a vector, so keyword search still finds them, and `npm run index`
+  fills them in later. Indexing runs after a meeting is marked ready, so notes are never held up by it.
 
 **Keeping AI costs predictable** (a public link with no login needs this):
 - One Claude call per meeting. Each template is generated on first use and then served from the database (a unique
@@ -158,7 +176,8 @@ Viewers ─▶ server-rendered pages sign short-lived media URLs; everything els
 npm install
 cp .env.example .env.local     # fill in the values below
 npm run db:push                # create tables in Neon
-npm run db:migrate             # existing databases: add open-items columns and backfill (idempotent)
+npm run db:migrate             # existing databases: open-items columns, pgvector + chunks table (idempotent)
+npm run index                  # chunk + embed existing meetings for Ask AI (add -- --all to rebuild)
 npm run dev
 ```
 
@@ -168,6 +187,7 @@ npm run dev
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET` | Private S3 bucket (Block Public Access on) with CORS allowing `PUT`/`GET`/`HEAD`; an IAM user limited to `s3:PutObject`, `s3:GetObject` and `s3:DeleteObject` on `arn:aws:s3:::<bucket>/*` |
 | `DEEPGRAM_API_KEY` | console.deepgram.com |
 | `ANTHROPIC_API_KEY`, `LLM_MODEL` | console.anthropic.com; defaults to `claude-haiku-4-5` |
+| `VOYAGE_API_KEY` | dash.voyageai.com. The free tier covers this app; without a card it's 3 requests/min, so `npm run index` is slow but finishes |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google Cloud OAuth client (Web). Enable the Calendar API, add scopes `openid`, `email` and `calendar.events.readonly`, and set the redirect URI to `<origin>/api/calendar/google/callback` |
 | `TOKEN_ENCRYPTION_KEY` | `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` |
 | `UPLOADS_ENABLED` | `true` or `false` |
@@ -196,6 +216,7 @@ Google shows an "unverified app" screen, because the demo hasn't been through Go
 ```
 src/lib/pipeline/      deepgram.ts · ai.ts (notes, templates, speaker names) · index.ts (orchestration, caching)
 src/lib/ask.ts         Ask AI context building + streaming
+src/lib/rag/           chunking + indexing, hybrid retrieval (pgvector + tsvector, RRF), Voyage embeddings
 src/lib/calendar/      Google OAuth, event mapping, token encryption, browser session
 src/lib/storage.ts     presigned S3 URLs
 src/app/api/           uploads, process, summaries, ask, segments, speakers, highlights, share, calendar

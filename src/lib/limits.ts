@@ -10,5 +10,9 @@ export const STALE_PROCESSING_MS = 6 * 60_000;
 export const ASK_PER_HOUR_PER_VISITOR = 30;
 export const ASK_PER_HOUR_GLOBAL = 300;
 export const ASK_MAX_QUESTION_CHARS = 500;
-/** Library-wide questions include whole transcripts up to this size (~60k tokens), summaries beyond it. */
-export const ASK_LIBRARY_TRANSCRIPT_CHARS = 240_000;
+/** Library-wide questions: the transcript excerpts retrieved per question (hybrid vector + keyword search). */
+export const RAG_TOP_K = 12;
+/** Candidates each retriever contributes before rank fusion. */
+export const RAG_CANDIDATES = 40;
+/** Target size of one retrieval chunk (~250 tokens); a chunk always holds whole transcript lines. */
+export const RAG_CHUNK_CHARS = 1000;

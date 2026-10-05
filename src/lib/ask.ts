@@ -1,10 +1,10 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "crypto";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import { actionItems, db, meetings, speakers, summaries } from "@/db";
-import { ASK_LIBRARY_TRANSCRIPT_CHARS } from "@/lib/limits";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { db, meetings, speakers, summaries } from "@/db";
 import { loadTranscriptText } from "@/lib/pipeline";
+import { renderExcerpts, retrieve } from "@/lib/rag";
 import { formatMs } from "@/lib/time";
 
 const client = new Anthropic();
@@ -20,7 +20,8 @@ const RULES = `Answer questions about recorded meetings using only the material 
 - Formatting: plain sentences, short "- " bullet lists when listing several things, **bold** sparingly. No headings, no tables.`;
 
 const MEETING_CITES = `- Cite the moment behind each claim with its timestamp in double brackets, copied from the transcript, e.g. [[12:34]].`;
-const LIBRARY_CITES = `- Cite the moment behind each claim as [[MEETING_ID@TIMESTAMP]], e.g. [[aB3xY9kLmN@12:34]], using the meeting id attribute and a timestamp copied from that transcript. When citing a meeting in general rather than a moment, use [[MEETING_ID@0:00]].
+const LIBRARY_CITES = `- You get a catalog of every meeting (with overviews) and transcript excerpts retrieved for this question. The excerpts are not complete transcripts: if they don't cover the question, say what you couldn't find rather than filling the gap.
+- Cite the moment behind each claim as [[MEETING_ID@TIMESTAMP]], e.g. [[aB3xY9kLmN@12:34]], using the meeting id attribute and a timestamp copied from that transcript. When citing a meeting in general rather than a moment, use [[MEETING_ID@0:00]].
 - Mention which meeting (by title and date) each point comes from.`;
 
 const attr = (v: string) => v.replace(/"/g, "'");
@@ -50,42 +51,44 @@ ${transcript}
 }
 
 /**
- * Every ready meeting, newest first. Whole transcripts while they fit the budget (best answers for a demo-sized
- * library); older meetings beyond it contribute their summary and action items instead.
+ * Library-wide questions (RAG). Two parts:
+ * - a catalog of every ready meeting (title, date, speakers, overview), so "which meetings…" questions work and the
+ *   model knows what exists. Changes only when meetings do, so it sits in the cached prompt block;
+ * - the transcript excerpts hybrid retrieval ranked most relevant to this question.
  */
-export async function libraryContext() {
+export async function libraryContext(question: string, history: AskTurn[]) {
   const rows = await db.select().from(meetings).where(eq(meetings.status, "ready")).orderBy(desc(meetings.startedAt)).limit(100);
   if (rows.length === 0) return null;
   const ids = rows.map((m) => m.id);
-  const [summaryRows, actionRows] = await Promise.all([
-    db.select().from(summaries).where(and(inArray(summaries.meetingId, ids), eq(summaries.template, "general"))),
-    db.select().from(actionItems).where(inArray(actionItems.meetingId, ids)).orderBy(asc(actionItems.timestampMs)),
-  ]);
 
-  let budget = ASK_LIBRARY_TRANSCRIPT_CHARS;
-  const parts: string[] = [];
+  // A follow-up ("what about her deadline?") only makes sense with the question before it.
+  const retrievalQuery = [history.at(-1)?.question, question].filter(Boolean).join("\n");
+  const [summaryRows, { chunks, mode }] = await Promise.all([
+    db.select().from(summaries).where(and(inArray(summaries.meetingId, ids), eq(summaries.template, "general"))),
+    retrieve(retrievalQuery),
+  ]);
+  const excerpts = await renderExcerpts(chunks);
+
+  const catalog: string[] = [];
   for (const m of rows) {
-    const header = `<meeting id="${m.id}" title="${attr(m.title)}" date="${dateLabel(m.startedAt)}" duration="${formatMs(m.durationS * 1000)}">
-Speakers: ${await speakerLine(m.id)}`;
-    const transcript = await loadTranscriptText(m.id);
-    if (transcript && transcript.length <= budget) {
-      budget -= transcript.length;
-      parts.push(`${header}\n<transcript>\n${transcript}\n</transcript>\n</meeting>`);
-      continue;
-    }
-    const summary = summaryRows.find((s) => s.meetingId === m.id)?.content;
-    const bullets = summary?.sections
-      .flatMap((sec) => sec.bullets.map((b) => `- ${sec.heading}: ${b.text}${b.timestampMs != null ? ` [${formatMs(b.timestampMs)}]` : ""}`))
-      .join("\n");
-    const actions = actionRows
-      .filter((a) => a.meetingId === m.id)
-      .map((a) => `- ${a.owner ? `${a.owner}: ` : ""}${a.text}${a.timestampMs != null ? ` [${formatMs(a.timestampMs)}]` : ""}`)
-      .join("\n");
-    parts.push(
-      `${header}\n(Transcript omitted for length; summary only.)\nOverview: ${summary?.overview ?? "n/a"}\n${bullets ?? ""}\nAction items:\n${actions || "- none"}\n</meeting>`,
-    );
+    const overview = summaryRows.find((s) => s.meetingId === m.id)?.content.overview ?? "n/a";
+    catalog.push(`<meeting id="${m.id}" title="${attr(m.title)}" date="${dateLabel(m.startedAt)}" duration="${formatMs(m.durationS * 1000)}">
+Speakers: ${await speakerLine(m.id)}
+Overview: ${overview}
+</meeting>`);
   }
-  return parts.join("\n\n");
+
+  const passages = rows
+    .filter((m) => excerpts.has(m.id))
+    .flatMap((m) =>
+      excerpts.get(m.id)!.map((text) => `<excerpt meeting_id="${m.id}" meeting_title="${attr(m.title)}">\n${text}\n</excerpt>`),
+    );
+
+  return {
+    context: `<meetings>\n${catalog.join("\n\n")}\n</meetings>`,
+    retrieved: passages.length ? `<excerpts>\n${passages.join("\n\n")}\n</excerpts>` : "<excerpts>\n(no matching passages)\n</excerpts>",
+    mode,
+  };
 }
 
 export function askCacheKey(scope: string, context: string, question: string, history: AskTurn[]) {
@@ -95,8 +98,11 @@ export function askCacheKey(scope: string, context: string, question: string, hi
     .digest("hex");
 }
 
-/** Streams the answer text. The context sits in a cached system block, so follow-ups on the same scope are cheap. */
-export function streamAnswer(opts: { scope: "meeting" | "library"; context: string; question: string; history: AskTurn[] }) {
+/**
+ * Streams the answer text. The stable context (a meeting's transcript, or the library catalog) sits in a cached system
+ * block so follow-ups are cheap; per-question retrieved excerpts come after it, outside the cached prefix.
+ */
+export function streamAnswer(opts: { scope: "meeting" | "library"; context: string; retrieved?: string; question: string; history: AskTurn[] }) {
   const messages: Anthropic.MessageParam[] = [];
   for (const turn of opts.history.slice(-3)) {
     messages.push({ role: "user", content: turn.question }, { role: "assistant", content: turn.answer });
@@ -109,6 +115,7 @@ export function streamAnswer(opts: { scope: "meeting" | "library"; context: stri
     system: [
       { type: "text", text: `${RULES}\n${opts.scope === "meeting" ? MEETING_CITES : LIBRARY_CITES}` },
       { type: "text", text: opts.context, cache_control: { type: "ephemeral" } },
+      ...(opts.retrieved ? [{ type: "text" as const, text: opts.retrieved }] : []),
     ],
     messages,
   });

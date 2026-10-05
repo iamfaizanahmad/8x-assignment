@@ -10,7 +10,8 @@
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file=.env.local scripts/migrate.ts",
-    "import": "tsx --env-file=.env.local --conditions=react-server scripts/import-recording.ts"
+    "import": "tsx --env-file=.env.local --conditions=react-server scripts/import-recording.ts",
+    "index": "tsx --env-file=.env.local --conditions=react-server scripts/index-meetings.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.126.0",

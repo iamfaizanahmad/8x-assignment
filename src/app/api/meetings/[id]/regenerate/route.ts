@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { db, meetings, summaries } from "@/db";
 import { rejectIfSample } from "@/lib/guards";
 import { analyzeMeeting } from "@/lib/pipeline/ai";
 import { analysisContext, loadTranscriptText, replaceActionItems } from "@/lib/pipeline";
+import { indexMeetingSafely } from "@/lib/rag";
 
 export const maxDuration = 120;
 
@@ -23,6 +24,8 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     // Keeps ticked items ticked when they come back from the new extraction.
     await replaceActionItems(id, analysis.actionItems);
     await db.update(meetings).set({ chapters: analysis.chapters }).where(eq(meetings.id, id));
+    // Re-embed with the corrected speaker names, so "what did <name> say" retrieves by the new name.
+    after(() => indexMeetingSafely(id, 60_000));
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[regenerate]", err);
